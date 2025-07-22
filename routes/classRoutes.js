@@ -1,0 +1,12 @@
+import express from 'express';
+import { createClass, getClasses, updateStudent, deleteStudent } from '../controllers/classController.js';
+import { authenticateToken } from '../middleware/auth.js';
+
+const router = express.Router();
+
+router.post('/create', authenticateToken, createClass);
+router.get('/', authenticateToken, getClasses);
+router.patch('/:classId/students/:studentId', authenticateToken, updateStudent);
+router.delete('/:classId/students/:studentId', authenticateToken, deleteStudent);
+
+export default router;
