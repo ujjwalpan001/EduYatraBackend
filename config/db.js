@@ -1,14 +1,19 @@
-require('dotenv').config(); // Load .env variables
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
+import dotenv from 'dotenv';
+
+dotenv.config(); // Load .env variables
 
 const connectDB = async () => {
   try {
-    await mongoose.connect(process.env.MONGO_URI); // Use variable from .env
-    console.log('✅ MongoDB Connected: ExamZone');
+    await mongoose.connect(process.env.MONGO_URI, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+    });
+    console.log('MongoDB Connected: ExamZone');
   } catch (err) {
-    console.error('❌ MongoDB Connection Error:', err.message);
+    console.error(err.message);
     process.exit(1);
   }
 };
 
-module.exports = connectDB;
+export default connectDB;
