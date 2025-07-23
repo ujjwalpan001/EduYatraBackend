@@ -27,7 +27,9 @@ connectDB();
 const allowedOrigins = [
   'http://localhost:3000',
   'http://192.168.29.184:8080', // Added for frontend
-  'http://localhost:8080',      // Optional: for local testing variations
+  'http://localhost:8080',
+  'https://edu-yatra.vercel.app', // Added for production
+  // Optional: for local testing variations
 ];
 
 app.use(cors({
