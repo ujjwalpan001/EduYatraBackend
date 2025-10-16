@@ -14,6 +14,8 @@ import QuestionBank from './models/QuestionBank.js';
 import Course from './models/Course.js';
 import Institute from './models/Institute.js';
 import Class from './models/Class.js';
+import QuestionSet from './models/QuestionSet.js';
+import QuestionSetQuestion from './models/QuestionSetQues.js';
 import mongoose from 'mongoose';
 
 dotenv.config();

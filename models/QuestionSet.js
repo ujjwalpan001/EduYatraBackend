@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const questionSetSchema = new mongoose.Schema({
   exam_id: {
@@ -13,7 +13,11 @@ const questionSetSchema = new mongoose.Schema({
   student_id: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',         // Reference to the users collection
-    required: true
+    required: false      // Optional, email is primary identifier
+  },
+  student_email: {
+    type: String,
+    required: true       // Email is the primary identifier
   },
   link: {
     type: String,
@@ -36,4 +40,5 @@ const questionSetSchema = new mongoose.Schema({
   }
 });
 
-module.exports = mongoose.model('QuestionSet', questionSetSchema);
+// Explicitly set collection name to 'questionsets' (lowercase plural)
+export default mongoose.models.QuestionSet || mongoose.model('QuestionSet', questionSetSchema, 'questionsets');

@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const questionSetQuestionSchema = new mongoose.Schema({
   questionset_id: {
@@ -24,4 +24,5 @@ const questionSetQuestionSchema = new mongoose.Schema({
 // Composite primary key equivalent can be enforced using unique compound index:
 questionSetQuestionSchema.index({ questionset_id: 1, question_id: 1 }, { unique: true });
 
-module.exports = mongoose.model('QuestionSetQuestion', questionSetQuestionSchema);
+// Explicitly set collection name to match MongoDB collection: 'questionsetsquestion'
+export default mongoose.models.QuestionSetQuestion || mongoose.model('QuestionSetQuestion', questionSetQuestionSchema, 'questionsetsquestion');

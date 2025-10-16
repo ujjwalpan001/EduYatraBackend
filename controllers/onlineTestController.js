@@ -1,9 +1,273 @@
 import Exam from '../models/Exam.js';
 import Question from '../models/Question.js';
 import Class from '../models/Class.js'; // Import Class model
+import User from '../models/User.js'; // Import User model to look up by email
 import mongoose from 'mongoose';
 import { authenticateToken } from '../middleware/auth.js';
 import Course from '../models/Course.js'; // Ensure Course model exists
+import QuestionSet from '../models/QuestionSet.js';
+import QuestionSetQuestion from '../models/QuestionSetQues.js';
+import crypto from 'crypto';
+
+/**
+ * Helper function to create unique question sets for students
+ * @param {Object} exam - The exam document
+ * @param {Array} students - Array of student objects from the class
+ * @returns {Promise<void>}
+ */
+const createUniqueQuestionSets = async (exam, students) => {
+  try {
+    const { _id: examId, question_ids, number_of_sets, number_of_questions_per_set } = exam;
+    
+    console.log(`\n${'='.repeat(70)}`);
+    console.log(`🔄 STARTING QUESTION SET CREATION`);
+    console.log(`${'='.repeat(70)}`);
+    console.log(`📋 Exam ID: ${examId}`);
+    console.log(`📊 Configuration:`);
+    console.log(`   - Sets required: ${number_of_sets}`);
+    console.log(`   - Questions per set: ${number_of_questions_per_set}`);
+    console.log(`   - Total questions available: ${question_ids?.length || 0}`);
+    console.log(`   - Total students: ${students?.length || 0}`);
+    
+    if (!students || students.length === 0) {
+      console.error(`❌ ERROR: No students provided!`);
+      throw new Error('No students in class');
+    }
+    
+    if (!question_ids || question_ids.length === 0) {
+      console.error(`❌ ERROR: No questions in exam!`);
+      throw new Error('No questions in exam');
+    }
+
+    // Validate we have enough questions
+    const totalQuestionsNeeded = number_of_sets * number_of_questions_per_set;
+    console.log(`\n✅ Validation:`);
+    console.log(`   - Questions needed: ${totalQuestionsNeeded}`);
+    console.log(`   - Questions available: ${question_ids.length}`);
+    
+    if (question_ids.length < totalQuestionsNeeded) {
+      const error = `Not enough questions. Need ${totalQuestionsNeeded}, but only ${question_ids.length} available`;
+      console.error(`❌ ${error}`);
+      throw new Error(error);
+    }
+    console.log(`   ✅ Sufficient questions available`);
+
+
+    // Shuffle questions to randomize
+    const shuffledQuestions = [...question_ids].sort(() => Math.random() - 0.5);
+
+    // Split questions into sets
+    const questionSets = [];
+    for (let i = 0; i < number_of_sets; i++) {
+      const start = i * number_of_questions_per_set;
+      const end = start + number_of_questions_per_set;
+      questionSets.push(shuffledQuestions.slice(start, end));
+    }
+
+    // Delete any existing question sets for this exam
+    console.log(`\n🧹 Cleaning up existing question sets...`);
+    const existingSetIds = await QuestionSet.find({ exam_id: examId }).distinct('_id');
+    console.log(`   - Found ${existingSetIds.length} existing sets`);
+    
+    if (existingSetIds.length > 0) {
+      const deletedQuestions = await QuestionSetQuestion.deleteMany({ 
+        questionset_id: { $in: existingSetIds } 
+      });
+      console.log(`   - Deleted ${deletedQuestions.deletedCount} question records`);
+      
+      const deletedSets = await QuestionSet.deleteMany({ exam_id: examId });
+      console.log(`   - Deleted ${deletedSets.deletedCount} question sets`);
+    } else {
+      console.log(`   - No existing sets to clean up`);
+    }
+
+    // Assign sets to ALL students in the batch/class
+    console.log(`\n👥 Student Assignment:`);
+    console.log(`   - Total students in batch/class: ${students.length}`);
+    
+    if (!students || students.length === 0) {
+      console.error('❌ No students in this class/batch!');
+      throw new Error('No students found in this class/batch. Please add students to the class first.');
+    }
+    
+    console.log(`\n🔍 Student Details:`);
+    students.forEach((student, idx) => {
+      console.log(`   Student ${idx + 1}: ${student.name} (${student.email})`);
+      console.log(`      Has userId: ${!!student.userId}`);
+      console.log(`      IsSelected: ${student.isSelected} (ignored - all students assigned)`);
+    });
+    
+    // IMPORTANT: Assign to ALL students in the batch/class
+    // When a teacher assigns an exam to a class/batch, ALL students get it
+    const studentsToAssign = students;
+    
+    console.log(`\n   ✅ All ${studentsToAssign.length} students in this batch will be assigned`);
+    
+    // Validate all students have valid email (primary identifier)
+    console.log(`\n🔍 Validating student data:`);
+    studentsToAssign.forEach((student, idx) => {
+      console.log(`\n   Student ${idx + 1}:`);
+      console.log(`      Name: ${student.name}`);
+      console.log(`      Email: ${student.email}`);
+      console.log(`      UserId: ${student.userId || 'N/A (email is primary)'}`);
+    });
+    
+    const invalidStudents = studentsToAssign.filter(s => !s.email);
+    if (invalidStudents.length > 0) {
+      console.error(`\n❌ CRITICAL: ${invalidStudents.length} students without email:`);
+      invalidStudents.forEach(s => {
+        console.error(`      - ${s.name} (userId: ${s.userId})`);
+      });
+      throw new Error(`${invalidStudents.length} students have no email. Please update class data.`);
+    }
+    console.log(`   ✅ All students have email (primary identifier)`);
+
+    // Distribute sets evenly among students
+    console.log(`\n${'='.repeat(70)}`);
+    console.log(`📝 ASSIGNING SETS TO STUDENTS`);
+    console.log(`${'='.repeat(70)}`);
+    
+    let successCount = 0;
+    let failCount = 0;
+    
+    for (let i = 0; i < studentsToAssign.length; i++) {
+      const student = studentsToAssign[i];
+      const setIndex = i % number_of_sets; // Round-robin assignment
+      const setNumber = setIndex + 1;
+      const questionsForThisSet = questionSets[setIndex];
+
+      console.log(`\n[${i + 1}/${studentsToAssign.length}] Student: ${student.name} (${student.email})`);
+      console.log(`   - Assigned Set: ${setNumber}`);
+      console.log(`   - Questions in set: ${questionsForThisSet.length}`);
+
+      // Try to find the user by email to get their ObjectId
+      let userObjectId = student.userId; // Use existing if available
+      
+      if (!userObjectId) {
+        console.log(`   - Looking up user by email: ${student.email}`);
+        try {
+          const userDoc = await User.findOne({ email: student.email, deleted_at: null });
+          if (userDoc) {
+            userObjectId = userDoc._id;
+            console.log(`   ✅ Found user! ObjectId: ${userObjectId}`);
+          } else {
+            console.log(`   ℹ️ User not found in database (will use email only)`);
+          }
+        } catch (lookupError) {
+          console.log(`   ⚠️ Error looking up user: ${lookupError.message}`);
+        }
+      } else {
+        console.log(`   - UserId from class: ${userObjectId}`);
+      }
+
+      // Generate unique link for this question set
+      const uniqueLink = `${examId}-set-${setNumber}-${Date.now()}-${crypto.randomBytes(8).toString('hex')}`;
+
+      // Create QuestionSet document (email is required, student_id is optional)
+      const questionSetData = {
+        exam_id: examId,
+        set_number: setNumber,
+        student_email: student.email,  // Primary identifier
+        link: uniqueLink,
+        is_completed: false,
+        created_at: new Date()
+      };
+      
+      // Add student_id only if we have it
+      if (userObjectId) {
+        questionSetData.student_id = userObjectId;
+      }
+      
+      console.log(`   - Creating QuestionSet document...`);
+
+      try {
+        const questionSet = new QuestionSet(questionSetData);
+        const savedQuestionSet = await questionSet.save();
+        console.log(`   ✅ QuestionSet saved! ID: ${savedQuestionSet._id}`);
+
+        // Create QuestionSetQuestion documents for each question in this set
+        console.log(`   - Creating ${questionsForThisSet.length} QuestionSetQuestion documents...`);
+        
+        const questionSetQuestions = questionsForThisSet.map((questionId, index) => ({
+          questionset_id: savedQuestionSet._id,
+          question_id: questionId,
+          question_order: index + 1,
+          created_at: new Date()
+        }));
+
+        console.log(`   - Sample question mapping:`, {
+          questionset_id: savedQuestionSet._id,
+          total_questions: questionSetQuestions.length,
+          first_question: questionSetQuestions[0]?.question_id,
+          last_question: questionSetQuestions[questionSetQuestions.length - 1]?.question_id
+        });
+
+        const insertedQuestions = await QuestionSetQuestion.insertMany(questionSetQuestions);
+        console.log(`   ✅ Successfully saved ${insertedQuestions.length} questions to QuestionSetQuestion collection!`);
+        console.log(`   - Question IDs saved:`, insertedQuestions.map(q => q._id.toString()).join(', '));
+        
+        successCount++;
+        console.log(`   ✅ SUCCESS`);
+
+      } catch (saveError) {
+        failCount++;
+        console.error(`   ❌❌❌ SAVE FAILED ❌❌❌`);
+        console.error(`   Error: ${saveError.message}`);
+        console.error(`   Stack:`, saveError.stack);
+        throw saveError;
+      }
+    }
+
+    console.log(`\n${'='.repeat(70)}`);
+    console.log(`📊 FINAL RESULTS:`);
+    console.log(`   ✅ Successful: ${successCount}`);
+    console.log(`   ❌ Failed: ${failCount}`);
+    console.log(`   📦 Total Sets: ${number_of_sets}`);
+    console.log(`   🎯 Students Processed: ${studentsToAssign.length}`);
+    
+    // Verify sets were actually saved
+    const verifyCount = await QuestionSet.countDocuments({ exam_id: examId });
+    console.log(`\n🔍 Database Verification:`);
+    console.log(`   - QuestionSets saved: ${verifyCount}`);
+    
+    if (verifyCount === 0) {
+      throw new Error('⚠️ CRITICAL: No question sets were saved to database!');
+    }
+    
+    // Verify questions were saved in QuestionSetQuestion collection
+    const savedQuestionSets = await QuestionSet.find({ exam_id: examId }).select('_id set_number student_email');
+    const questionSetIds = savedQuestionSets.map(qs => qs._id);
+    const totalQuestionsInSets = await QuestionSetQuestion.countDocuments({ 
+      questionset_id: { $in: questionSetIds } 
+    });
+    
+    console.log(`   - QuestionSetQuestions saved: ${totalQuestionsInSets}`);
+    console.log(`   - Expected questions: ${number_of_sets * number_of_questions_per_set}`);
+    
+    if (totalQuestionsInSets === 0) {
+      throw new Error('⚠️ CRITICAL: No questions were saved to QuestionSetQuestion collection!');
+    }
+    
+    console.log(`\n📋 Detailed Breakdown:`);
+    for (const qs of savedQuestionSets) {
+      const qCount = await QuestionSetQuestion.countDocuments({ questionset_id: qs._id });
+      console.log(`   Set ${qs.set_number} (${qs.student_email}): ${qCount} questions`);
+    }
+    
+    console.log(`${'='.repeat(70)}\n`);
+    console.log(`✅ Successfully created ${number_of_sets} unique question sets with ${totalQuestionsInSets} total questions for ${studentsToAssign.length} students`);
+    
+  } catch (error) {
+    console.error(`\n${'='.repeat(70)}`);
+    console.error('❌❌❌ CRITICAL ERROR IN createUniqueQuestionSets ❌❌❌');
+    console.error(`${'='.repeat(70)}`);
+    console.error('Error:', error.message);
+    console.error('Stack:', error.stack);
+    console.error(`${'='.repeat(70)}\n`);
+    throw error;
+  }
+};
+
 export const getAssignedExams = async (req, res) => {
   try {
     const { user } = req; // From auth middleware
@@ -254,22 +518,78 @@ export const updateSecuritySettings = async (req, res) => {
 
 export const assignGroup = async (req, res) => {
   try {
+    console.log(`\n\n${'#'.repeat(80)}`);
+    console.log(`# ASSIGN EXAM TO CLASS REQUEST`);
+    console.log(`${'#'.repeat(80)}`);
+    
     const { id } = req.params; // Exam ID
     const { groupId } = req.body; // Class ID
+    
+    console.log(`📋 Request Details:`);
+    console.log(`   - Exam ID: ${id}`);
+    console.log(`   - Class ID: ${groupId}`);
+    
     if (!mongoose.Types.ObjectId.isValid(id) || !mongoose.Types.ObjectId.isValid(groupId)) {
+      console.error(`❌ Invalid ID format`);
       return res.status(400).json({ success: false, error: 'Invalid ID' });
     }
+    
+    console.log(`\n🔍 Finding exam...`);
     const exam = await Exam.findOne({ _id: id, deleted_at: null });
-    if (!exam) return res.status(404).json({ success: false, error: 'Exam not found' });
+    if (!exam) {
+      console.error(`❌ Exam not found: ${id}`);
+      return res.status(404).json({ success: false, error: 'Exam not found' });
+    }
+    console.log(`✅ Found exam: "${exam.title}"`);
+    console.log(`   - Questions: ${exam.question_ids?.length || 0}`);
+    console.log(`   - Sets: ${exam.number_of_sets}`);
+    console.log(`   - Questions per set: ${exam.number_of_questions_per_set}`);
+    
+    console.log(`\n🔍 Finding class...`);
     const classDoc = await Class.findOne({ _id: groupId, deleted_at: null });
-    if (!classDoc) return res.status(404).json({ success: false, error: 'Class not found' });
+    if (!classDoc) {
+      console.error(`❌ Class not found: ${groupId}`);
+      return res.status(404).json({ success: false, error: 'Class not found' });
+    }
+    console.log(`✅ Found class: "${classDoc.class_name}"`);
+    console.log(`   - Students: ${classDoc.students?.length || 0}`);
+    
+    console.log(`\n💾 Updating exam...`);
     exam.class_id = groupId;
     exam.is_published = true;
     await exam.save();
-    console.log(`Exam ${id} assigned to class ${groupId}, is_published: ${exam.is_published}`);
-    res.status(200).json({ success: true, message: 'Class assigned successfully', exam });
+    console.log(`✅ Exam updated and published`);
+    
+    // Create unique question sets for students when exam is published
+    console.log(`\n🚀 Creating question sets...`);
+    try {
+      await createUniqueQuestionSets(exam, classDoc.students);
+      console.log(`✅ Question sets creation completed!`);
+    } catch (setError) {
+      console.error(`❌ Question sets creation FAILED:`, setError.message);
+      return res.status(500).json({ 
+        success: false, 
+        error: `Failed to create question sets: ${setError.message}` 
+      });
+    }
+    
+    console.log(`\n${'#'.repeat(80)}`);
+    console.log(`# ✅ ASSIGNMENT COMPLETED SUCCESSFULLY`);
+    console.log(`${'#'.repeat(80)}\n\n`);
+    
+    res.status(200).json({ 
+      success: true, 
+      message: 'Class assigned and question sets created successfully', 
+      exam 
+    });
+    
   } catch (error) {
-    console.error("❌ Error assigning class:", error);
+    console.error(`\n${'#'.repeat(80)}`);
+    console.error("# ❌ ERROR IN ASSIGN GROUP");
+    console.error(`${'#'.repeat(80)}`);
+    console.error("Error:", error.message);
+    console.error("Stack:", error.stack);
+    console.error(`${'#'.repeat(80)}\n`);
     res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -333,10 +653,84 @@ export const getExamQuestions = async (req, res) => {
       if (exam.end_time && now > new Date(exam.end_time)) {
         return res.status(403).json({ success: false, error: 'Exam has expired' });
       }
+
+      // Get the student's assigned question set (search by email first, then by student_id)
+      console.log(`🔍 Looking for question set: exam=${id}, email=${user.email}, student_id=${user.id || 'N/A'}`);
+      
+      let questionSet = await QuestionSet.findOne({
+        exam_id: id,
+        student_email: user.email  // Primary lookup by email
+      });
+
+      // Fallback: try by student_id if email lookup failed
+      if (!questionSet && user.id) {
+        console.log(`   ℹ️ Email lookup failed, trying by student_id...`);
+        questionSet = await QuestionSet.findOne({
+          exam_id: id,
+          student_id: user.id
+        });
+      }
+
+      if (!questionSet) {
+        console.error(`❌ No question set found for student ${user.email} (ID: ${user.id || 'N/A'}) in exam ${id}`);
+        
+        // Debug: Check what sets exist for this exam
+        const allSetsForExam = await QuestionSet.find({ exam_id: id }).select('set_number student_id student_email');
+        console.log(`   Available sets for this exam:`, allSetsForExam);
+        
+        return res.status(404).json({ 
+          success: false, 
+          error: 'No question set assigned to you for this exam. Please contact your instructor.' 
+        });
+      }
+      
+      console.log(`✅ Found question set: ${questionSet._id}, Set #${questionSet.set_number}`);
+
+      // Get the questions for this specific set
+      const questionSetQuestions = await QuestionSetQuestion.find({
+        questionset_id: questionSet._id
+      }).sort({ question_order: 1 });
+
+      const questionIds = questionSetQuestions.map(qsq => qsq.question_id);
+
+      const questions = await Question.find({
+        _id: { $in: questionIds },
+        question_bank_id: exam.question_bank_id,
+        deleted_at: null,
+      }).select('latex_code correct_option_latex incorrect_option_latex subject difficulty_rating');
+
+      if (!questions.length) {
+        return res.status(404).json({ success: false, error: 'No questions found for this exam' });
+      }
+
+      // Create a map for maintaining order
+      const questionMap = new Map(questions.map(q => [q._id.toString(), q]));
+
+      // Format questions in the correct order
+      const formattedQuestions = questionIds.map(qId => {
+        const q = questionMap.get(qId.toString());
+        if (!q) return null;
+        return {
+          id: q._id.toString(),
+          text: q.latex_code,
+          options: [...q.incorrect_option_latex, q.correct_option_latex].sort(() => Math.random() - 0.5), // Shuffle options
+          correctAnswer: q.correct_option_latex,
+          subject: q.subject,
+          difficulty_rating: q.difficulty_rating,
+        };
+      }).filter(q => q !== null);
+
+      return res.status(200).json({ 
+        success: true, 
+        questions: formattedQuestions,
+        setNumber: questionSet.set_number 
+      });
+
     } else if (user.role !== 'admin' && exam.teacher_id.toString() !== user.id) {
       return res.status(403).json({ success: false, error: 'Unauthorized: Not the exam owner' });
     }
 
+    // For teachers/admins, return all questions
     const questions = await Question.find({
       _id: { $in: exam.question_ids },
       question_bank_id: exam.question_bank_id,
@@ -360,5 +754,139 @@ export const getExamQuestions = async (req, res) => {
   } catch (error) {
     console.error('Error fetching exam questions:', error);
     res.status(500).json({ success: false, error: `Server error: ${error.message}` });
+  }
+};
+
+/**
+ * Regenerate question sets for an exam
+ * Useful when students are added after initial assignment or for debugging
+ */
+export const regenerateQuestionSets = async (req, res) => {
+  try {
+    const user = req.user;
+    if (!user || !['teacher', 'admin'].includes(user.role)) {
+      return res.status(403).json({ success: false, error: 'Unauthorized: Only teachers or admins can regenerate question sets' });
+    }
+
+    const { id } = req.params; // Exam ID
+    
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, error: 'Invalid exam ID' });
+    }
+
+    const exam = await Exam.findOne({ _id: id, deleted_at: null });
+    if (!exam) {
+      return res.status(404).json({ success: false, error: 'Exam not found' });
+    }
+
+    // Verify the user owns this exam (for teachers)
+    if (user.role === 'teacher' && exam.teacher_id.toString() !== user.id) {
+      return res.status(403).json({ success: false, error: 'Unauthorized: Not the exam owner' });
+    }
+
+    if (!exam.class_id) {
+      return res.status(400).json({ success: false, error: 'Exam is not assigned to any class' });
+    }
+
+    const classDoc = await Class.findOne({ _id: exam.class_id, deleted_at: null });
+    if (!classDoc) {
+      return res.status(404).json({ success: false, error: 'Class not found' });
+    }
+
+    // Regenerate question sets
+    await createUniqueQuestionSets(exam, classDoc.students);
+
+    res.status(200).json({ 
+      success: true, 
+      message: 'Question sets regenerated successfully',
+      totalStudents: classDoc.students.length,
+      numberOfSets: exam.number_of_sets,
+      questionsPerSet: exam.number_of_questions_per_set
+    });
+  } catch (error) {
+    console.error('❌ Error regenerating question sets:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+/**
+ * Debug endpoint - Get all question sets for an exam
+ * Helps verify that sets were created correctly
+ */
+export const getQuestionSetsDebug = async (req, res) => {
+  try {
+    const user = req.user;
+    if (!user || !['teacher', 'admin'].includes(user.role)) {
+      return res.status(403).json({ success: false, error: 'Unauthorized' });
+    }
+
+    const { id } = req.params; // Exam ID
+    
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, error: 'Invalid exam ID' });
+    }
+
+    const exam = await Exam.findOne({ _id: id, deleted_at: null });
+    if (!exam) {
+      return res.status(404).json({ success: false, error: 'Exam not found' });
+    }
+
+    // Get all question sets for this exam
+    const questionSets = await QuestionSet.find({ exam_id: id })
+      .populate('student_id', 'email name')
+      .lean();
+
+    console.log(`\n📊 Debug Info for Exam ${id}:`);
+    console.log(`   - Found ${questionSets.length} question sets`);
+
+    // Get questions for each set
+    const setsWithQuestions = await Promise.all(
+      questionSets.map(async (set) => {
+        const questions = await QuestionSetQuestion.find({ 
+          questionset_id: set._id 
+        }).sort({ question_order: 1 }).lean();
+        
+        console.log(`   Set ${set.set_number}:`);
+        console.log(`      Student Email: ${set.student_email}`);
+        console.log(`      Student ID: ${set.student_id || 'N/A'}`);
+        console.log(`      Questions: ${questions.length}`);
+        
+        return {
+          questionSetId: set._id,
+          setNumber: set.set_number,
+          studentEmail: set.student_email,
+          studentId: set.student_id,
+          studentName: set.student_id?.name,
+          link: set.link,
+          isCompleted: set.is_completed,
+          questionCount: questions.length,
+          questions: questions.map(q => ({
+            id: q._id,
+            questionId: q.question_id,
+            order: q.question_order
+          }))
+        };
+      })
+    );
+
+    // Calculate total questions saved
+    const totalQuestionsSaved = setsWithQuestions.reduce((sum, set) => sum + set.questionCount, 0);
+    const expectedTotalQuestions = exam.number_of_sets * exam.number_of_questions_per_set;
+
+    res.status(200).json({ 
+      success: true,
+      examId: id,
+      examTitle: exam.title,
+      totalSets: questionSets.length,
+      expectedSets: exam.number_of_sets,
+      questionsPerSet: exam.number_of_questions_per_set,
+      totalQuestionsSaved: totalQuestionsSaved,
+      expectedTotalQuestions: expectedTotalQuestions,
+      allQuestionsMatch: totalQuestionsSaved === expectedTotalQuestions,
+      sets: setsWithQuestions
+    });
+  } catch (error) {
+    console.error('❌ Error fetching question sets debug info:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 };

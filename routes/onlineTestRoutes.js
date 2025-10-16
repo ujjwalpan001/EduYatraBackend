@@ -8,7 +8,9 @@ import {
   updateSecuritySettings, 
   assignGroup, 
   scheduleExam,
-  getExamQuestions // Include missing import
+  getExamQuestions, // Include missing import
+  regenerateQuestionSets,
+  getQuestionSetsDebug
 } from '../controllers/onlineTestController.js';
 import { authenticateToken } from '../middleware/auth.js';
 import Class from '../models/Class.js';
@@ -71,6 +73,51 @@ router.patch('/:id', authenticateToken, updateExam);
 router.patch('/:id/security', authenticateToken, updateSecuritySettings);
 router.post('/:id/assign-group', authenticateToken, assignGroup);
 router.patch('/:id/schedule', authenticateToken, scheduleExam);
+router.post('/:id/regenerate-sets', authenticateToken, regenerateQuestionSets); // Add regenerate endpoint
+router.get('/:id/debug-sets', authenticateToken, getQuestionSetsDebug); // Debug endpoint
+router.get('/:id/test-save', authenticateToken, async (req, res) => {
+  // Test endpoint to verify QuestionSetQuestion can save
+  try {
+    const QuestionSetQuestion = (await import('../models/QuestionSetQues.js')).default;
+    const QuestionSet = (await import('../models/QuestionSet.js')).default;
+    
+    console.log('\n🧪 TEST SAVE ENDPOINT CALLED');
+    console.log(`   QuestionSet collection: ${QuestionSet.collection.name}`);
+    console.log(`   QuestionSetQuestion collection: ${QuestionSetQuestion.collection.name}`);
+    
+    // Count existing documents
+    const setCount = await QuestionSet.countDocuments();
+    const questionCount = await QuestionSetQuestion.countDocuments();
+    
+    console.log(`   Existing QuestionSets: ${setCount}`);
+    console.log(`   Existing QuestionSetQuestions: ${questionCount}`);
+    
+    // Check raw collections
+    const db = mongoose.connection.db;
+    const rawSets = await db.collection('questionsets').countDocuments();
+    const rawQuestions = await db.collection('questionsetsquestion').countDocuments();
+    
+    console.log(`   Raw 'questionsets': ${rawSets}`);
+    console.log(`   Raw 'questionsetsquestion': ${rawQuestions}`);
+    
+    res.json({
+      success: true,
+      collections: {
+        questionSetModel: QuestionSet.collection.name,
+        questionSetQuestionModel: QuestionSetQuestion.collection.name
+      },
+      counts: {
+        modelQuestionSets: setCount,
+        modelQuestionSetQuestions: questionCount,
+        rawQuestionSets: rawSets,
+        rawQuestionSetQuestions: rawQuestions
+      }
+    });
+  } catch (error) {
+    console.error('❌ Test endpoint error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 router.get('/:id/questions', authenticateToken, getExamQuestions); // Add missing route
 
 export default router;

@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const classSchema = new mongoose.Schema({
   class_name: {
@@ -34,8 +34,8 @@ const classSchema = new mongoose.Schema({
   students: [{
     name: { type: String, required: true },
     email: { type: String, required: true },
-    userId: { type: String, required: true },
-    isSelected: { type: Boolean, default: false },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    isSelected: { type: Boolean, default: true },
   }],
   is_active: {
     type: Boolean,
@@ -63,4 +63,4 @@ classSchema.pre('save', function (next) {
   next();
 });
 
-module.exports = mongoose.model('Class', classSchema);
+export default mongoose.models.Class || mongoose.model('Class', classSchema);
