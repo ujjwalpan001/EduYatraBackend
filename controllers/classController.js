@@ -1,5 +1,7 @@
 import mongoose from 'mongoose';
 import Class from '../models/Class.js';
+import ClassStudent from '../models/ClassStudent.js';
+import User from '../models/User.js';
 
 export const getClasses = async (req, res) => {
   try {
@@ -45,9 +47,140 @@ export const createClass = async (req, res) => {
     });
 
     await classDoc.save();
+    
+    // Also create ClassStudent entries for each student
+    if (students && students.length > 0) {
+      const classStudentEntries = [];
+      
+      for (const student of students) {
+        // Find the user by email or userId
+        let studentUser = null;
+        
+        if (student.userId) {
+          studentUser = await User.findById(student.userId);
+        }
+        
+        if (!studentUser && student.email) {
+          studentUser = await User.findOne({ email: student.email });
+        }
+        
+        if (studentUser) {
+          // Create ClassStudent entry only if student user exists
+          classStudentEntries.push({
+            class_id: classDoc._id,
+            student_id: studentUser._id,
+            joined_at: new Date(),
+            is_active: true
+          });
+        } else {
+          console.warn(`⚠️ Student user not found for: ${student.email || student.userId}`);
+        }
+      }
+      
+      if (classStudentEntries.length > 0) {
+        await ClassStudent.insertMany(classStudentEntries, { ordered: false });
+        console.log(`✅ Created ${classStudentEntries.length} ClassStudent entries for class ${classDoc._id}`);
+      }
+    }
+    
     return res.status(201).json({ success: true, class: classDoc });
   } catch (error) {
+    console.error('❌ Error creating class:', error);
     return res.status(500).json({ success: false, error: `Failed to create class: ${error.message}` });
+  }
+};
+
+// Add students to an existing class
+export const addStudents = async (req, res) => {
+  try {
+    const { user } = req;
+    if (!user || !['teacher', 'admin'].includes(user.role)) {
+      return res.status(403).json({ success: false, error: 'Unauthorized' });
+    }
+
+    const { classId } = req.params;
+    const { students } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(classId)) {
+      return res.status(400).json({ success: false, error: 'Invalid class ID' });
+    }
+
+    if (!students || !Array.isArray(students) || students.length === 0) {
+      return res.status(400).json({ success: false, error: 'Students array is required' });
+    }
+
+    // Find the class and verify teacher access
+    const classDoc = await Class.findOne({ _id: classId, teacher_id: user.id, deleted_at: null });
+    if (!classDoc) {
+      return res.status(404).json({ success: false, error: 'Class not found' });
+    }
+
+    console.log(`📝 Adding ${students.length} students to class ${classDoc.class_name}`);
+
+    // Add students to Class.students array (existing behavior)
+    classDoc.students.push(...students);
+    classDoc.updated_at = new Date();
+    await classDoc.save();
+
+    // Also create ClassStudent entries for analytics
+    const classStudentEntries = [];
+    const warnings = [];
+
+    for (const student of students) {
+      let studentUser = null;
+      
+      // Try to find user by userId first, then by email
+      if (student.userId) {
+        studentUser = await User.findById(student.userId);
+      }
+      
+      if (!studentUser && student.email) {
+        studentUser = await User.findOne({ email: student.email });
+      }
+
+      if (studentUser) {
+        // Check if ClassStudent entry already exists
+        const existingEntry = await ClassStudent.findOne({
+          class_id: classDoc._id,
+          student_id: studentUser._id
+        });
+
+        if (!existingEntry) {
+          classStudentEntries.push({
+            class_id: classDoc._id,
+            student_id: studentUser._id,
+            joined_at: new Date(),
+            is_active: true
+          });
+        } else {
+          console.log(`ℹ️  ClassStudent entry already exists for ${student.name || student.email}`);
+        }
+      } else {
+        warnings.push(`User not found for student: ${student.name || student.email}`);
+        console.warn(`⚠️  Could not find User for student: ${student.name || student.email}`);
+      }
+    }
+
+    // Insert new ClassStudent entries
+    if (classStudentEntries.length > 0) {
+      await ClassStudent.insertMany(classStudentEntries, { ordered: false });
+      console.log(`✅ Created ${classStudentEntries.length} ClassStudent entries for class ${classDoc._id}`);
+    }
+
+    const response = { 
+      success: true, 
+      class: classDoc,
+      classStudentEntriesCreated: classStudentEntries.length
+    };
+
+    if (warnings.length > 0) {
+      response.warnings = warnings;
+    }
+
+    return res.status(200).json(response);
+  } catch (error) {
+    console.error('❌ Error adding students:', error);
+    return res.status(500).json({ success: false, error: `Failed to add students: ${error.message}` });
   }
 };
 
@@ -113,9 +246,23 @@ export const deleteStudent = async (req, res) => {
       return res.status(404).json({ success: false, error: 'Student not found' });
     }
 
+    const student = classDoc.students[studentIndex];
+
+    // Remove from Class.students array
     classDoc.students.splice(studentIndex, 1);
     classDoc.updated_at = new Date();
     await classDoc.save();
+
+    // Also remove from ClassStudent collection if it exists
+    if (student.userId) {
+      const deleteResult = await ClassStudent.deleteOne({
+        class_id: classDoc._id,
+        student_id: student.userId
+      });
+      if (deleteResult.deletedCount > 0) {
+        console.log(`✅ Deleted ClassStudent entry for student ${student.userId} in class ${classDoc._id}`);
+      }
+    }
 
     return res.status(200).json({ success: true, class: classDoc });
   } catch (error) {

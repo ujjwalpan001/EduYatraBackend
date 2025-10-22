@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const classStudentSchema = new mongoose.Schema({
   class_id: {
@@ -26,4 +26,5 @@ const classStudentSchema = new mongoose.Schema({
 // Composite unique index to prevent duplicate entries
 classStudentSchema.index({ class_id: 1, student_id: 1 }, { unique: true });
 
-module.exports = mongoose.model('ClassStudent', classStudentSchema);
+const ClassStudent = mongoose.model('ClassStudent', classStudentSchema);
+export default ClassStudent;
