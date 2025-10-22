@@ -10,7 +10,10 @@ import {
   scheduleExam,
   getExamQuestions, // Include missing import
   regenerateQuestionSets,
-  getQuestionSetsDebug
+  getQuestionSetsDebug,
+  submitTest,
+  getAttendedTests,
+  getStudentPerformance
 } from '../controllers/onlineTestController.js';
 import { authenticateToken } from '../middleware/auth.js';
 import Class from '../models/Class.js';
@@ -37,6 +40,8 @@ router.get('/question-banks', authenticateToken, async (req, res) => {
   }
 });
 router.get('/assigned', authenticateToken, getAssignedExams);
+router.get('/attended-tests', authenticateToken, getAttendedTests); // IMPORTANT: Must be before /:id route
+router.get('/student-performance', authenticateToken, getStudentPerformance); // Student performance stats
 
 router.get('/groups', authenticateToken, async (req, res) => {
   console.log('Fetching classes...', { path: req.path, params: req.params });
@@ -64,6 +69,9 @@ router.get('/questions', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+// Test submission endpoints - MUST be before dynamic routes
+router.post('/submit-test', authenticateToken, submitTest);
 
 // Dynamic routes after static routes
 router.post('/create', authenticateToken, createExam);

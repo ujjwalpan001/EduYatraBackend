@@ -7,6 +7,7 @@ import { authenticateToken } from '../middleware/auth.js';
 import Course from '../models/Course.js'; // Ensure Course model exists
 import QuestionSet from '../models/QuestionSet.js';
 import QuestionSetQuestion from '../models/QuestionSetQues.js';
+import TestSubmission from '../models/TestSubmission.js';
 import crypto from 'crypto';
 
 /**
@@ -294,11 +295,27 @@ export const getAssignedExams = async (req, res) => {
       class_id: { $in: classIds },
       is_published: true, // Only show published exams
       deleted_at: null,
-    }).select('_id title duration_minutes number_of_questions_per_set description start_time end_time');
+    }).select('_id title duration_minutes number_of_questions_per_set description start_time end_time').lean();
 
     console.log(`Fetched ${exams.length} exams for student ${user.email}:`, exams);
 
-    const formattedExams = exams.map(exam => {
+    // Get question sets for this student to check completion status
+    const examIds = exams.map(e => e._id);
+    const questionSets = await QuestionSet.find({
+      exam_id: { $in: examIds },
+      student_email: user.email
+    }).select('exam_id is_completed').lean();
+
+    const completedExamIds = new Set(
+      questionSets
+        .filter(qs => qs.is_completed)
+        .map(qs => qs.exam_id.toString())
+    );
+
+    // Filter out completed exams - only show ongoing ones
+    const ongoingExams = exams.filter(exam => !completedExamIds.has(exam._id.toString()));
+
+    const formattedExams = ongoingExams.map(exam => {
       const now = new Date();
       const endTime = new Date(exam.end_time);
       const timeRemainingMs = endTime - now;
@@ -320,8 +337,12 @@ export const getAssignedExams = async (req, res) => {
         completedQuestions: 0, // Placeholder: Update if tracking completions
         timeRemaining,
         category: 'Unknown', // Add category field to Exam model if needed
+        duration_minutes: exam.duration_minutes,
+        numberOfQuestionsPerSet: exam.number_of_questions_per_set,
       };
     });
+
+    console.log(`Returning ${formattedExams.length} ongoing exams (${completedExamIds.size} completed)`);
 
     return res.status(200).json({ success: true, exams: formattedExams });
   } catch (error) {
@@ -888,5 +909,351 @@ export const getQuestionSetsDebug = async (req, res) => {
   } catch (error) {
     console.error('❌ Error fetching question sets debug info:', error);
     res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+/**
+ * Submit test and mark as completed
+ */
+export const submitTest = async (req, res) => {
+  try {
+    const { user } = req;
+    if (!user || user.role !== 'student') {
+      return res.status(403).json({ success: false, error: 'Unauthorized' });
+    }
+
+    const { examId, testName, answers, score, reason, timeSpentSeconds } = req.body;
+
+    console.log('\n📝 Test Submission Request:');
+    console.log(`   Student: ${user.email}`);
+    console.log(`   Exam ID: ${examId}`);
+    console.log(`   Score: ${score}`);
+    console.log(`   Time Spent: ${timeSpentSeconds}s`);
+
+    if (!examId || !mongoose.Types.ObjectId.isValid(examId)) {
+      return res.status(400).json({ success: false, error: 'Invalid exam ID' });
+    }
+
+    // Find the student's question set
+    let questionSet = await QuestionSet.findOne({
+      exam_id: examId,
+      student_email: user.email
+    });
+
+    if (!questionSet && user.id) {
+      questionSet = await QuestionSet.findOne({
+        exam_id: examId,
+        student_id: user.id
+      });
+    }
+
+    if (!questionSet) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'No question set found for this exam' 
+      });
+    }
+
+    // Get the exam details
+    const exam = await Exam.findOne({ _id: examId, deleted_at: null });
+    if (!exam) {
+      return res.status(404).json({ success: false, error: 'Exam not found' });
+    }
+
+    // Get all questions for this set
+    const questionSetQuestions = await QuestionSetQuestion.find({
+      questionset_id: questionSet._id
+    });
+
+    const totalQuestions = questionSetQuestions.length;
+
+    // Calculate correct answers
+    const questionIds = questionSetQuestions.map(qsq => qsq.question_id);
+    const questions = await Question.find({
+      _id: { $in: questionIds },
+      deleted_at: null
+    });
+
+    let correctAnswers = 0;
+    questions.forEach(q => {
+      if (answers[q._id.toString()] === q.correct_option_latex) {
+        correctAnswers++;
+      }
+    });
+
+    const percentage = totalQuestions > 0 ? (correctAnswers / totalQuestions) * 100 : 0;
+
+    // Mark question set as completed
+    questionSet.is_completed = true;
+    questionSet.completed_at = new Date();
+    await questionSet.save();
+
+    // Create test submission record
+    const testSubmission = new TestSubmission({
+      exam_id: examId,
+      student_id: user.id,
+      student_email: user.email,
+      question_set_id: questionSet._id,
+      answers: answers,
+      score: score,
+      total_questions: totalQuestions,
+      correct_answers: correctAnswers,
+      percentage: percentage,
+      time_spent_seconds: timeSpentSeconds || 0,
+      submission_reason: reason || 'Manual submission',
+      submitted_at: new Date()
+    });
+
+    await testSubmission.save();
+
+    console.log('✅ Test submitted successfully');
+    console.log(`   - Correct Answers: ${correctAnswers}/${totalQuestions}`);
+    console.log(`   - Percentage: ${percentage.toFixed(2)}%`);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Test submitted successfully',
+      submission: {
+        score: score,
+        correctAnswers: correctAnswers,
+        totalQuestions: totalQuestions,
+        percentage: percentage,
+        submittedAt: testSubmission.submitted_at
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error submitting test:', error);
+    return res.status(500).json({ success: false, error: `Failed to submit test: ${error.message}` });
+  }
+};
+
+/**
+ * Get attended (completed) tests for a student
+ */
+export const getAttendedTests = async (req, res) => {
+  try {
+    const { user } = req;
+    console.log('\n📚 getAttendedTests called');
+    console.log('   User:', user?.email, 'Role:', user?.role);
+    
+    if (!user || user.role !== 'student') {
+      console.log('❌ Unauthorized access attempt');
+      return res.status(403).json({ success: false, error: 'Unauthorized' });
+    }
+
+    console.log(`\n📚 Fetching attended tests for student: ${user.email}`);
+
+    // Find all completed test submissions for this student
+    const submissions = await TestSubmission.find({
+      student_email: user.email
+    }).sort({ submitted_at: -1 }).lean();
+
+    console.log(`   Found ${submissions.length} test submissions in database`);
+    if (submissions.length > 0) {
+      console.log('   First submission sample:', JSON.stringify(submissions[0], null, 2));
+    }
+
+    if (!submissions.length) {
+      console.log('⚠️ No attended tests found for this student');
+      return res.status(200).json({ success: true, attendedTests: [] });
+    }
+
+    // Get exam details for each submission
+    const examIds = submissions.map(s => s.exam_id);
+    console.log(`   Looking up ${examIds.length} exams...`);
+    
+    const exams = await Exam.find({
+      _id: { $in: examIds },
+      deleted_at: null
+    }).select('_id title teacher_id').lean();
+
+    console.log(`   Found ${exams.length} exams`);
+    const examMap = new Map(exams.map(e => [e._id.toString(), e]));
+
+    // Get teacher names
+    const teacherIds = exams.map(e => e.teacher_id).filter(Boolean);
+    console.log(`   Looking up ${teacherIds.length} teachers...`);
+    
+    const teachers = await User.find({
+      _id: { $in: teacherIds },
+      deleted_at: null
+    }).select('_id name').lean();
+
+    console.log(`   Found ${teachers.length} teachers`);
+    const teacherMap = new Map(teachers.map(t => [t._id.toString(), t.name]));
+
+    // Format the attended tests
+    const attendedTests = submissions.map(submission => {
+      const exam = examMap.get(submission.exam_id.toString());
+      const teacherName = exam?.teacher_id ? teacherMap.get(exam.teacher_id.toString()) : 'Unknown';
+      
+      // Calculate grade based on percentage
+      let grade = 'F';
+      if (submission.percentage >= 90) grade = 'A';
+      else if (submission.percentage >= 80) grade = 'B+';
+      else if (submission.percentage >= 70) grade = 'B';
+      else if (submission.percentage >= 60) grade = 'C';
+      else if (submission.percentage >= 50) grade = 'D';
+
+      // Format time spent
+      const hours = Math.floor(submission.time_spent_seconds / 3600);
+      const minutes = Math.floor((submission.time_spent_seconds % 3600) / 60);
+      const timeSpent = hours > 0 ? `${hours}h ${minutes}m` : `${minutes} min`;
+
+      // Format date
+      const date = new Date(submission.submitted_at).toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
+      });
+
+      return {
+        _id: submission._id,
+        examId: submission.exam_id,
+        test: exam?.title || 'Unknown Test',
+        score: Math.round(submission.percentage),
+        date: date,
+        instructor: teacherName,
+        grade: grade,
+        totalQuestions: submission.total_questions,
+        correctAnswers: submission.correct_answers,
+        timeSpent: timeSpent,
+        submittedAt: submission.submitted_at
+      };
+    });
+
+    console.log(`✅ Returning ${attendedTests.length} formatted attended tests`);
+    if (attendedTests.length > 0) {
+      console.log('   First formatted test:', JSON.stringify(attendedTests[0], null, 2));
+    }
+
+    return res.status(200).json({ 
+      success: true, 
+      attendedTests: attendedTests
+    });
+  } catch (error) {
+    console.error('❌ Error fetching attended tests:', error);
+    console.error('   Stack:', error.stack);
+    return res.status(500).json({ success: false, error: `Failed to fetch attended tests: ${error.message}` });
+  }
+};
+
+/**
+ * Get student performance statistics
+ */
+export const getStudentPerformance = async (req, res) => {
+  try {
+    const { user } = req;
+    console.log('\n📊 getStudentPerformance called');
+    console.log('   User:', user?.email, 'Role:', user?.role);
+    
+    if (!user || user.role !== 'student') {
+      console.log('❌ Unauthorized access attempt');
+      return res.status(403).json({ success: false, error: 'Unauthorized' });
+    }
+
+    console.log(`\n📊 Calculating performance stats for student: ${user.email}`);
+
+    // Find all completed test submissions for this student
+    const submissions = await TestSubmission.find({
+      student_email: user.email
+    }).lean();
+
+    console.log(`   Found ${submissions.length} test submissions`);
+
+    if (!submissions.length) {
+      console.log('⚠️ No test submissions found - returning zero stats');
+      return res.status(200).json({ 
+        success: true, 
+        performance: {
+          testsAttempted: 0,
+          averageScore: 0,
+          bestScore: 0,
+          totalTimeSpent: 0,
+          recentScores: []
+        }
+      });
+    }
+
+    // Calculate statistics
+    const testsAttempted = submissions.length;
+    const scores = submissions.map(s => s.percentage);
+    const averageScore = scores.reduce((sum, score) => sum + score, 0) / testsAttempted;
+    const bestScore = Math.max(...scores);
+    const totalTimeSpent = submissions.reduce((sum, s) => sum + (s.time_spent_seconds || 0), 0);
+
+    // Get recent scores (last 10)
+    const recentSubmissions = submissions
+      .sort((a, b) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime())
+      .slice(0, 10);
+
+    // Get exam details for recent submissions
+    const recentExamIds = recentSubmissions.map(s => s.exam_id);
+    const recentExams = await Exam.find({
+      _id: { $in: recentExamIds },
+      deleted_at: null
+    }).select('_id title').lean();
+
+    const examMap = new Map(recentExams.map(e => [e._id.toString(), e]));
+
+    const recentScores = recentSubmissions.map(submission => {
+      const exam = examMap.get(submission.exam_id.toString());
+      const date = new Date(submission.submitted_at).toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
+      });
+
+      return {
+        examTitle: exam?.title || 'Unknown Test',
+        score: Math.round(submission.percentage),
+        date: date,
+        submittedAt: submission.submitted_at
+      };
+    });
+
+    // Calculate subject-wise performance if subjects are tracked
+    const subjectStats = {};
+    for (const submission of submissions) {
+      const exam = await Exam.findById(submission.exam_id).select('title').lean();
+      if (exam) {
+        // Try to extract subject from title (simplified - could be enhanced)
+        const subject = exam.title.split('-')[0]?.trim() || 'General';
+        if (!subjectStats[subject]) {
+          subjectStats[subject] = { total: 0, count: 0 };
+        }
+        subjectStats[subject].total += submission.percentage;
+        subjectStats[subject].count += 1;
+      }
+    }
+
+    const subjectPerformance = Object.entries(subjectStats).map(([subject, stats]) => ({
+      subject,
+      averageScore: Math.round(stats.total / stats.count),
+      testsAttempted: stats.count
+    }));
+
+    const performance = {
+      testsAttempted,
+      averageScore: Math.round(averageScore * 10) / 10, // Round to 1 decimal
+      bestScore: Math.round(bestScore),
+      totalTimeSpent, // in seconds
+      recentScores,
+      subjectPerformance
+    };
+
+    console.log('✅ Performance stats calculated:');
+    console.log(`   Tests Attempted: ${testsAttempted}`);
+    console.log(`   Average Score: ${performance.averageScore}%`);
+    console.log(`   Best Score: ${performance.bestScore}%`);
+
+    return res.status(200).json({ 
+      success: true, 
+      performance
+    });
+  } catch (error) {
+    console.error('❌ Error fetching student performance:', error);
+    console.error('   Stack:', error.stack);
+    return res.status(500).json({ success: false, error: `Failed to fetch performance: ${error.message}` });
   }
 };
