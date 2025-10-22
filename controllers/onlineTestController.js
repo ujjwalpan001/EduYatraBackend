@@ -463,7 +463,30 @@ export const createExam = async (req, res) => {
 
 export const getAllExams = async (req, res) => {
   try {
-    const exams = await Exam.find({ deleted_at: null }); // Added deleted_at filter
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+
+    // Filter exams based on user role
+    let query = { deleted_at: null };
+    
+    if (user.role === 'teacher') {
+      // Teachers only see their own exams
+      query.teacher_id = user.id;
+    } else if (user.role === 'student') {
+      // Students shouldn't access this endpoint, but if they do, return empty
+      return res.status(403).json({ success: false, error: 'Students cannot access all exams' });
+    }
+    // Admin sees all exams (no additional filter)
+
+    const exams = await Exam.find(query)
+      .populate('teacher_id', 'fullName email')
+      .populate('course_id', 'name code')
+      .sort({ created_at: -1 });
+    
+    console.log(`✅ Fetched ${exams.length} exams for user ${user.id} (role: ${user.role})`);
+    
     res.status(200).json({ success: true, exams });
   } catch (error) {
     console.error("❌ Error fetching exams:", error);
@@ -1255,5 +1278,145 @@ export const getStudentPerformance = async (req, res) => {
     console.error('❌ Error fetching student performance:', error);
     console.error('   Stack:', error.stack);
     return res.status(500).json({ success: false, error: `Failed to fetch performance: ${error.message}` });
+  }
+};
+
+// Get exam analysis for teachers
+export const getExamAnalysis = async (req, res) => {
+  try {
+    const user = req.user;
+    
+    if (!user || !['teacher', 'admin'].includes(user.role)) {
+      return res.status(403).json({ success: false, error: 'Unauthorized: Only teachers can view exam analysis' });
+    }
+
+    // Get all exams for this teacher
+    let examQuery = { deleted_at: null };
+    if (user.role === 'teacher') {
+      examQuery.teacher_id = user.id;
+    }
+
+    const exams = await Exam.find(examQuery)
+      .populate('class_id', 'class_name')
+      .populate('question_bank_id', 'name')
+      .sort({ created_at: -1 });
+
+    // Get submissions for each exam
+    const examAnalysis = await Promise.all(
+      exams.map(async (exam) => {
+        const submissions = await TestSubmission.find({ exam_id: exam._id });
+        
+        const totalParticipants = submissions.length;
+        const avgScore = totalParticipants > 0 
+          ? submissions.reduce((sum, sub) => sum + sub.percentage, 0) / totalParticipants 
+          : 0;
+        const avgTimeSpent = totalParticipants > 0
+          ? submissions.reduce((sum, sub) => sum + sub.time_spent_seconds, 0) / totalParticipants
+          : 0;
+        
+        return {
+          exam_id: exam._id,
+          exam_name: exam.title || exam.exam_name || 'Untitled Exam',
+          course: exam.class_id?.class_name || exam.question_bank_id?.name || 'N/A',
+          date: exam.created_at,
+          start_time: exam.start_time,
+          end_time: exam.end_time,
+          duration_minutes: exam.duration_minutes,
+          total_marks: exam.total_marks,
+          status: exam.status || 'Draft',
+          participants: totalParticipants,
+          avgScore: Math.round(avgScore * 10) / 10,
+          avgTimeSpent: Math.round(avgTimeSpent / 60) // Convert to minutes
+        };
+      })
+    );
+
+    // Calculate overall statistics
+    const totalTests = exams.length;
+    const completedTests = exams.filter(e => e.status === 'Completed' || e.status === 'published').length;
+    const totalSubmissions = await TestSubmission.countDocuments({ 
+      exam_id: { $in: exams.map(e => e._id) }
+    });
+    
+    const allSubmissions = await TestSubmission.find({ 
+      exam_id: { $in: exams.map(e => e._id) }
+    });
+    
+    const overallAvgScore = allSubmissions.length > 0
+      ? allSubmissions.reduce((sum, sub) => sum + sub.percentage, 0) / allSubmissions.length
+      : 0;
+      
+    const overallAvgTime = allSubmissions.length > 0
+      ? allSubmissions.reduce((sum, sub) => sum + sub.time_spent_seconds, 0) / allSubmissions.length / 60
+      : 0;
+
+    console.log(`✅ Fetched analysis for ${totalTests} exams (${user.role}: ${user.id})`);
+
+    res.status(200).json({
+      success: true,
+      summary: {
+        totalTests,
+        completedTests,
+        totalParticipants: totalSubmissions,
+        avgScore: Math.round(overallAvgScore * 10) / 10,
+        avgTimeMinutes: Math.round(overallAvgTime)
+      },
+      exams: examAnalysis
+    });
+  } catch (error) {
+    console.error('❌ Error fetching exam analysis:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// Get participants for a specific exam
+export const getExamParticipants = async (req, res) => {
+  try {
+    const user = req.user;
+    const { examId } = req.params;
+
+    if (!user || !['teacher', 'admin'].includes(user.role)) {
+      return res.status(403).json({ success: false, error: 'Unauthorized' });
+    }
+
+    // Verify the exam belongs to this teacher (or user is admin)
+    const exam = await Exam.findById(examId);
+    if (!exam) {
+      return res.status(404).json({ success: false, error: 'Exam not found' });
+    }
+
+    if (user.role === 'teacher' && exam.teacher_id.toString() !== user.id) {
+      return res.status(403).json({ success: false, error: 'Unauthorized to view this exam' });
+    }
+
+    // Get all submissions for this exam with student details
+    const submissions = await TestSubmission.find({ exam_id: examId })
+      .populate('student_id', 'fullName email')
+      .sort({ submitted_at: -1 });
+
+    const participants = submissions.map(sub => ({
+      student_id: sub.student_id?._id,
+      student_name: sub.student_id?.fullName || 'Unknown',
+      student_email: sub.student_email || sub.student_id?.email || 'N/A',
+      score: sub.score,
+      percentage: sub.percentage,
+      correct_answers: sub.correct_answers,
+      total_questions: sub.total_questions,
+      time_spent_minutes: Math.round(sub.time_spent_seconds / 60),
+      submitted_at: sub.submitted_at,
+      submission_reason: sub.submission_reason
+    }));
+
+    console.log(`✅ Fetched ${participants.length} participants for exam ${examId}`);
+
+    res.status(200).json({
+      success: true,
+      exam_name: exam.title || exam.exam_name || 'Untitled Exam',
+      total_participants: participants.length,
+      participants
+    });
+  } catch (error) {
+    console.error('❌ Error fetching exam participants:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 };
