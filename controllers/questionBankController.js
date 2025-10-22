@@ -74,9 +74,23 @@ export const getQuestionsByBankId = async (req, res) => {
       return res.status(403).json({ success: false, error: "Unauthorized access" });
     }
 
-    const questions = await Question.find({ question_bank_id: questionBankId }).select(
-      "text difficulty_rating subject"
+    const questions = await Question.find({ 
+      question_bank_id: questionBankId,
+      deleted_at: null 
+    }).select(
+      '_id latex_code katex_code question_type difficulty_rating subject correct_option_latex correct_option_katex incorrect_option_latex incorrect_option_katex topic Sub_topic'
     );
+    
+    console.log(`✅ getQuestionsByBankId: Found ${questions.length} questions for bank ${questionBankId}`);
+    if (questions.length > 0) {
+      console.log('📝 First question has:', {
+        id: questions[0]._id,
+        latex_code: !!questions[0].latex_code,
+        katex_code: !!questions[0].katex_code,
+        subject: questions[0].subject
+      });
+    }
+    
     res.status(200).json({ success: true, questions });
   } catch (error) {
     console.error("Error fetching questions:", error);

@@ -191,11 +191,57 @@ export const getQuestionsByQuestionBank = async (req, res) => {
     }
 
     const questions = await Question.find({ question_bank_id: questionBankId, deleted_at: null })
-      .select('_id latex_code question_type difficulty_rating');
+      .select('_id latex_code katex_code question_type difficulty_rating subject correct_option_latex correct_option_katex incorrect_option_latex incorrect_option_katex topic Sub_topic');
 
+    console.log(`✅ Found ${questions.length} questions for bank ${questionBankId}`);
+    
+    // Log first question for debugging
+    if (questions.length > 0) {
+      const firstQ = questions[0];
+      console.log('📝 Sample question FULL OBJECT:', JSON.stringify(firstQ, null, 2));
+      console.log('📝 Sample question latex_code:', firstQ.latex_code);
+      console.log('📝 Sample question katex_code length:', firstQ.katex_code?.length);
+      console.log('📝 Fields in question object:', Object.keys(firstQ._doc || firstQ));
+    }
+    
     res.status(200).json({ success: true, questions });
   } catch (error) {
     console.error("❌ Error fetching questions:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// Update a question
+export const updateQuestion = async (req, res) => {
+  try {
+    const { questionId } = req.params;
+    const updateData = req.body;
+
+    console.log('📝 Updating question:', questionId);
+    console.log('📝 Update data:', updateData);
+
+    if (!questionId || !mongoose.Types.ObjectId.isValid(questionId)) {
+      return res.status(400).json({ success: false, error: "Valid question ID is required" });
+    }
+
+    // Find and update the question
+    const question = await Question.findByIdAndUpdate(
+      questionId,
+      {
+        ...updateData,
+        updated_at: new Date()
+      },
+      { new: true, runValidators: true }
+    );
+
+    if (!question) {
+      return res.status(404).json({ success: false, error: "Question not found" });
+    }
+
+    console.log('✅ Question updated successfully');
+    res.status(200).json({ success: true, question });
+  } catch (error) {
+    console.error("❌ Error updating question:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
