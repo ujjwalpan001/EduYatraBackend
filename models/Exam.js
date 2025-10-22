@@ -72,7 +72,13 @@ const examSchema = new mongoose.Schema({
   },
   updated_at: {
     type: Date
+  },
+  deleted_at: {
+    type: Date,
+    default: null
   }
+}, {
+  strictPopulate: false
 });
 
 export default mongoose.models.Exam || mongoose.model('Exam', examSchema);
