@@ -226,32 +226,45 @@ export const updateStudent = async (req, res) => {
 export const deleteStudent = async (req, res) => {
   try {
     const { user } = req;
+    console.log('🗑️ DELETE student request from user:', user?.id, user?.role);
+    
     if (!user || !['teacher', 'admin'].includes(user.role)) {
+      console.log('❌ Unauthorized delete student attempt');
       return res.status(403).json({ success: false, error: 'Unauthorized' });
     }
 
     const { classId, studentId } = req.params;
+    console.log('📋 Delete student params:', { classId, studentId });
 
     if (!mongoose.Types.ObjectId.isValid(classId)) {
+      console.log('❌ Invalid class ID format');
       return res.status(400).json({ success: false, error: 'Invalid class ID' });
     }
 
     const classDoc = await Class.findOne({ _id: classId, teacher_id: user.id, deleted_at: null });
     if (!classDoc) {
+      console.log('❌ Class not found or unauthorized');
       return res.status(404).json({ success: false, error: 'Class not found' });
     }
 
     const studentIndex = classDoc.students.findIndex(s => s._id.toString() === studentId);
     if (studentIndex === -1) {
+      console.log('❌ Student not found in class');
       return res.status(404).json({ success: false, error: 'Student not found' });
     }
 
     const student = classDoc.students[studentIndex];
+    console.log('👤 Found student to delete:', student.name, student.email);
 
-    // Remove from Class.students array
-    classDoc.students.splice(studentIndex, 1);
-    classDoc.updated_at = new Date();
-    await classDoc.save();
+    // Remove from Class.students array using $pull to avoid validation
+    await Class.updateOne(
+      { _id: classDoc._id },
+      { 
+        $pull: { students: { _id: studentId } },
+        $set: { updated_at: new Date() }
+      }
+    );
+    console.log('✅ Removed from Class.students array');
 
     // Also remove from ClassStudent collection if it exists
     if (student.userId) {
@@ -261,11 +274,65 @@ export const deleteStudent = async (req, res) => {
       });
       if (deleteResult.deletedCount > 0) {
         console.log(`✅ Deleted ClassStudent entry for student ${student.userId} in class ${classDoc._id}`);
+      } else {
+        console.log(`ℹ️  No ClassStudent entry found for student ${student.userId}`);
       }
     }
 
-    return res.status(200).json({ success: true, class: classDoc });
+    console.log('✅ Student deletion successful');
+    return res.status(200).json({ success: true, message: 'Student deleted successfully' });
   } catch (error) {
+    console.error('❌ Error deleting student:', error);
     return res.status(500).json({ success: false, error: `Failed to delete student: ${error.message}` });
+  }
+};
+
+// Delete entire class/batch
+export const deleteClass = async (req, res) => {
+  try {
+    const { user } = req;
+    console.log('🗑️ DELETE class request from user:', user?.id, user?.role);
+    
+    if (!user || !['teacher', 'admin'].includes(user.role)) {
+      console.log('❌ Unauthorized delete class attempt');
+      return res.status(403).json({ success: false, error: 'Unauthorized' });
+    }
+
+    const { classId } = req.params;
+    console.log('📋 Delete class ID:', classId);
+
+    if (!mongoose.Types.ObjectId.isValid(classId)) {
+      console.log('❌ Invalid class ID format');
+      return res.status(400).json({ success: false, error: 'Invalid class ID' });
+    }
+
+    // Find the class and verify teacher access
+    const classDoc = await Class.findOne({ _id: classId, teacher_id: user.id, deleted_at: null });
+    if (!classDoc) {
+      console.log('❌ Class not found or unauthorized');
+      return res.status(404).json({ success: false, error: 'Class not found' });
+    }
+
+    console.log('📚 Found class to delete:', classDoc.class_name);
+
+    // Soft delete: set deleted_at timestamp using updateOne to avoid validation
+    await Class.updateOne(
+      { _id: classDoc._id },
+      { $set: { deleted_at: new Date() } }
+    );
+    console.log('✅ Class soft deleted');
+
+    // Also delete all ClassStudent entries for this class
+    const deleteResult = await ClassStudent.deleteMany({ class_id: classDoc._id });
+    console.log(`✅ Deleted ${deleteResult.deletedCount} ClassStudent entries for class ${classDoc._id}`);
+
+    return res.status(200).json({ 
+      success: true, 
+      message: 'Class deleted successfully',
+      studentsRemoved: deleteResult.deletedCount
+    });
+  } catch (error) {
+    console.error('❌ Error deleting class:', error);
+    return res.status(500).json({ success: false, error: `Failed to delete class: ${error.message}` });
   }
 };
