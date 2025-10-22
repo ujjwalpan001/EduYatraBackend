@@ -483,7 +483,14 @@ export const getAllExams = async (req, res) => {
 
     const exams = await Exam.find(query)
       .populate('teacher_id', 'fullName email')
-      .populate('course_id', 'name code')
+      .populate({
+        path: 'class_id',
+        select: 'class_name course_id',
+        populate: {
+          path: 'course_id',
+          select: 'name course_code'
+        }
+      })
       .sort({ created_at: -1 });
     
     console.log(`✅ Fetched ${exams.length} exams for user ${user.id} (role: ${user.role})`);

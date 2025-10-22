@@ -55,6 +55,7 @@ const classSchema = new mongoose.Schema({
   },
 }, {
   versionKey: false,
+  strictPopulate: false,
 });
 
 // Update updated_at before saving
