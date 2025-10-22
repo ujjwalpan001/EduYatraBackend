@@ -15,7 +15,9 @@ import {
   getAttendedTests,
   getStudentPerformance,
   getExamAnalysis,
-  getExamParticipants
+  getExamParticipants,
+  getAllStudentsForAnalysis,
+  getStudentDetailedAnalysis
 } from '../controllers/onlineTestController.js';
 import { authenticateToken } from '../middleware/auth.js';
 import Class from '../models/Class.js';
@@ -45,6 +47,8 @@ router.get('/assigned', authenticateToken, getAssignedExams);
 router.get('/attended-tests', authenticateToken, getAttendedTests); // IMPORTANT: Must be before /:id route
 router.get('/student-performance', authenticateToken, getStudentPerformance); // Student performance stats
 router.get('/exam-analysis', authenticateToken, getExamAnalysis); // Teacher exam analysis
+router.get('/students-analysis', authenticateToken, getAllStudentsForAnalysis); // Get all students for analysis
+router.get('/student-analysis/:studentId', authenticateToken, getStudentDetailedAnalysis); // Get detailed student analysis
 router.get('/:examId/participants', authenticateToken, getExamParticipants); // Get participants for specific exam
 
 router.get('/groups', authenticateToken, async (req, res) => {

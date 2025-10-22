@@ -8,6 +8,7 @@ import Course from '../models/Course.js'; // Ensure Course model exists
 import QuestionSet from '../models/QuestionSet.js';
 import QuestionSetQuestion from '../models/QuestionSetQues.js';
 import TestSubmission from '../models/TestSubmission.js';
+import ClassStudent from '../models/ClassStudent.js';
 import crypto from 'crypto';
 
 /**
@@ -1417,6 +1418,218 @@ export const getExamParticipants = async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Error fetching exam participants:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// Get all students for individual analysis (teacher only)
+export const getAllStudentsForAnalysis = async (req, res) => {
+  try {
+    const user = req.user;
+    
+    if (!user || !['teacher', 'admin'].includes(user.role)) {
+      return res.status(403).json({ success: false, error: 'Unauthorized: Only teachers can view student analysis' });
+    }
+
+    console.log(`\n📊 Fetching all students for analysis - Teacher: ${user.id}`);
+
+    // Get all classes for this teacher
+    let classQuery = { deleted_at: null };
+    if (user.role === 'teacher') {
+      classQuery.teacher_id = user.id;
+    }
+
+    const classes = await Class.find(classQuery);
+    const classIds = classes.map(c => c._id);
+
+    console.log(`📚 Found ${classes.length} classes for teacher`);
+
+    // Get all class-student relationships for these classes
+    const classStudents = await ClassStudent.find({
+      class_id: { $in: classIds },
+      is_active: true
+    }).populate('student_id', 'first_name last_name email created_at');
+
+    console.log(`👥 Found ${classStudents.length} class-student relationships`);
+
+    // Get test submissions for each student
+    const studentAnalysis = await Promise.all(
+      classStudents.map(async (classStudent) => {
+        const student = classStudent.student_id;
+        
+        if (!student) return null; // Skip if student was deleted
+        
+        const submissions = await TestSubmission.find({ student_id: student._id });
+        
+        const testsCompleted = submissions.length;
+        const avgScore = testsCompleted > 0
+          ? submissions.reduce((sum, sub) => sum + sub.percentage, 0) / testsCompleted
+          : 0;
+        
+        const totalTimeSpent = submissions.reduce((sum, sub) => sum + (sub.time_spent_seconds || 0), 0);
+        const avgTimeMinutes = testsCompleted > 0 
+          ? Math.round(totalTimeSpent / testsCompleted / 60)
+          : 0;
+
+        const classInfo = classes.find(c => c._id.toString() === classStudent.class_id.toString());
+
+        return {
+          student_id: student._id,
+          student_name: `${student.first_name} ${student.last_name}`,
+          email: student.email,
+          class_name: classInfo?.class_name || 'Unknown',
+          class_id: classStudent.class_id,
+          tests_completed: testsCompleted,
+          avg_score: Math.round(avgScore * 10) / 10,
+          avg_time_minutes: avgTimeMinutes,
+          joined_date: classStudent.joined_at || student.created_at
+        };
+      })
+    );
+
+    // Filter out null entries
+    const validStudentAnalysis = studentAnalysis.filter(s => s !== null);
+
+    // Sort by average score descending
+    validStudentAnalysis.sort((a, b) => b.avg_score - a.avg_score);
+
+    // Add rank
+    validStudentAnalysis.forEach((student, index) => {
+      student.rank = index + 1;
+    });
+
+    console.log(`✅ Prepared analysis for ${validStudentAnalysis.length} students`);
+
+    res.status(200).json({
+      success: true,
+      total_students: validStudentAnalysis.length,
+      students: validStudentAnalysis
+    });
+  } catch (error) {
+    console.error('❌ Error fetching students for analysis:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// Get detailed analysis for a specific student
+export const getStudentDetailedAnalysis = async (req, res) => {
+  try {
+    const user = req.user;
+    const { studentId } = req.params;
+
+    if (!user || !['teacher', 'admin'].includes(user.role)) {
+      return res.status(403).json({ success: false, error: 'Unauthorized: Only teachers can view student analysis' });
+    }
+
+    console.log(`\n📊 Fetching detailed analysis for student: ${studentId}`);
+
+    // Get student info
+    const student = await User.findById(studentId).select('first_name last_name email created_at');
+    
+    if (!student) {
+      return res.status(404).json({ success: false, error: 'Student not found' });
+    }
+
+    // Get the student's class through ClassStudent model
+    const classStudent = await ClassStudent.findOne({ 
+      student_id: studentId, 
+      is_active: true 
+    }).populate('class_id', 'class_name teacher_id');
+
+    if (!classStudent) {
+      return res.status(404).json({ success: false, error: 'Student not enrolled in any class' });
+    }
+
+    // Verify teacher has access to this student's class
+    if (user.role === 'teacher') {
+      if (classStudent.class_id.teacher_id.toString() !== user.id.toString()) {
+        return res.status(403).json({ success: false, error: 'You do not have access to this student' });
+      }
+    }
+
+    // Get all test submissions for this student
+    const submissions = await TestSubmission.find({ student_id: studentId })
+      .populate({
+        path: 'exam_id',
+        select: 'title exam_name class_id question_bank_id created_at',
+        populate: {
+          path: 'question_bank_id',
+          select: 'name subject'
+        }
+      })
+      .sort({ submitted_at: -1 });
+
+    console.log(`📝 Found ${submissions.length} test submissions`);
+
+    // Calculate statistics
+    const testsCompleted = submissions.length;
+    const avgScore = testsCompleted > 0
+      ? submissions.reduce((sum, sub) => sum + sub.percentage, 0) / testsCompleted
+      : 0;
+    
+    const bestScore = testsCompleted > 0
+      ? Math.max(...submissions.map(sub => sub.percentage))
+      : 0;
+
+    const totalTimeSpent = submissions.reduce((sum, sub) => sum + (sub.time_spent_seconds || 0), 0);
+    const avgTimeMinutes = testsCompleted > 0 
+      ? Math.round(totalTimeSpent / testsCompleted / 60)
+      : 0;
+
+    // Recent test results
+    const recentTests = submissions.slice(0, 10).map(sub => ({
+      exam_id: sub.exam_id?._id,
+      exam_name: sub.exam_id?.title || sub.exam_id?.exam_name || 'Untitled Exam',
+      subject: sub.exam_id?.question_bank_id?.subject || 'Unknown',
+      score: sub.score,
+      total_questions: sub.total_questions,
+      percentage: Math.round(sub.percentage * 10) / 10,
+      time_spent_minutes: Math.round(sub.time_spent_seconds / 60),
+      submitted_at: sub.submitted_at,
+      correct_answers: sub.correct_answers
+    }));
+
+    // Subject-wise performance
+    const subjectMap = new Map();
+    submissions.forEach(sub => {
+      const subject = sub.exam_id?.question_bank_id?.subject || 'Unknown';
+      if (!subjectMap.has(subject)) {
+        subjectMap.set(subject, { totalScore: 0, count: 0 });
+      }
+      const subjectData = subjectMap.get(subject);
+      subjectData.totalScore += sub.percentage;
+      subjectData.count += 1;
+    });
+
+    const subjectPerformance = Array.from(subjectMap.entries()).map(([subject, data]) => ({
+      subject,
+      avg_score: Math.round((data.totalScore / data.count) * 10) / 10,
+      tests_attempted: data.count
+    })).sort((a, b) => b.avg_score - a.avg_score);
+
+    console.log(`✅ Detailed analysis prepared for ${student.first_name} ${student.last_name}`);
+
+    res.status(200).json({
+      success: true,
+      student: {
+        student_id: student._id,
+        name: `${student.first_name} ${student.last_name}`,
+        email: student.email,
+        class_name: classStudent.class_id?.class_name || 'Unknown',
+        joined_date: classStudent.joined_at || student.created_at
+      },
+      statistics: {
+        tests_completed: testsCompleted,
+        avg_score: Math.round(avgScore * 10) / 10,
+        best_score: Math.round(bestScore * 10) / 10,
+        avg_time_minutes: avgTimeMinutes,
+        total_time_spent_minutes: Math.round(totalTimeSpent / 60)
+      },
+      recent_tests: recentTests,
+      subject_performance: subjectPerformance
+    });
+  } catch (error) {
+    console.error('❌ Error fetching detailed student analysis:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
