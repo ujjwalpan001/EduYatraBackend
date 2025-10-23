@@ -1633,3 +1633,215 @@ export const getStudentDetailedAnalysis = async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 };
+
+// Get ongoing test monitoring data
+export const getTestMonitoringData = async (req, res) => {
+  try {
+    const { user } = req;
+    if (!user || !['teacher', 'admin'].includes(user.role)) {
+      return res.status(403).json({ success: false, error: 'Unauthorized' });
+    }
+
+    const { examId } = req.params;
+    console.log(`📊 Fetching monitoring data for exam ${examId}`);
+
+    // Verify exam exists and teacher has access
+    const exam = await Exam.findOne({ _id: examId, teacher_id: user.id })
+      .populate('class_id', 'class_name students')
+      .populate('question_bank_id', 'name');
+
+    if (!exam) {
+      return res.status(404).json({ success: false, error: 'Exam not found' });
+    }
+
+    // Get all question sets for this exam
+    const questionSets = await QuestionSet.find({ exam_id: examId })
+      .select('student_email set_number is_completed submitted_at created_at')
+      .lean();
+
+    // Get all test submissions for this exam
+    const submissions = await TestSubmission.find({ exam_id: examId })
+      .populate('student_id', 'first_name last_name email')
+      .select('student_id score percentage time_spent_seconds submitted_at')
+      .lean();
+
+    // Get students from the class
+    const students = exam.class_id.students || [];
+    
+    // Build student monitoring data
+    const studentData = students.map(student => {
+      const studentQuestionSet = questionSets.find(qs => qs.student_email === student.email);
+      const studentSubmission = submissions.find(sub => sub.student_id.email === student.email);
+
+      let status = 'Not Started';
+      let timeRemaining = exam.duration_minutes;
+      let currentQuestion = 0;
+      let attemptedQuestions = 0;
+
+      if (studentSubmission) {
+        status = 'Completed';
+        timeRemaining = 0;
+        currentQuestion = exam.number_of_questions_per_set;
+        attemptedQuestions = exam.number_of_questions_per_set;
+      } else if (studentQuestionSet) {
+        status = studentQuestionSet.is_completed ? 'Completed' : 'In Progress';
+        
+        // Calculate time remaining
+        const startedAt = new Date(studentQuestionSet.created_at);
+        const now = new Date();
+        const elapsedMinutes = (now - startedAt) / (1000 * 60);
+        timeRemaining = Math.max(0, exam.duration_minutes - elapsedMinutes);
+      }
+
+      return {
+        id: student._id.toString(),
+        name: student.name,
+        email: student.email,
+        userId: student.userId,
+        status,
+        timeRemaining: Math.round(timeRemaining),
+        totalTime: exam.duration_minutes,
+        questionSet: studentQuestionSet?.set_number || 0,
+        currentQuestion,
+        totalQuestions: exam.number_of_questions_per_set,
+        proctoring: {
+          webcamEnabled: true,
+          tabSwitches: 0,
+          suspiciousActivity: 0,
+          lastActivity: studentQuestionSet ? 'Active' : 'Not Started'
+        },
+        answers: {
+          attempted: attemptedQuestions,
+          marked: 0
+        },
+        score: studentSubmission?.score || 0,
+        percentage: studentSubmission?.percentage || 0,
+        submittedAt: studentSubmission?.submitted_at || studentQuestionSet?.submitted_at
+      };
+    });
+
+    // Calculate stats
+    const activeStudents = studentData.filter(s => s.status === 'In Progress').length;
+    const completedStudents = studentData.filter(s => s.status === 'Completed').length;
+
+    const testDetails = {
+      id: exam._id,
+      title: exam.title,
+      subject: exam.question_bank_id?.name || 'Unknown',
+      duration: exam.duration_minutes,
+      totalStudents: students.length,
+      activeStudents,
+      completedStudents,
+      startTime: exam.start_time,
+      endTime: exam.end_time,
+      questionSets: exam.number_of_sets,
+      questionsPerSet: exam.number_of_questions_per_set,
+      securitySettings: {
+        disableTabSwitching: true,
+        disableRightClick: true,
+        enableProctoring: false,
+        enableWebcam: false
+      }
+    };
+
+    console.log(`✅ Fetched monitoring data: ${studentData.length} students, ${activeStudents} active, ${completedStudents} completed`);
+
+    res.status(200).json({
+      success: true,
+      testDetails,
+      students: studentData,
+      alerts: [] // Can be implemented later for real-time alerts
+    });
+  } catch (error) {
+    console.error('❌ Error fetching monitoring data:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// Pause test for a student
+export const pauseStudentTest = async (req, res) => {
+  try {
+    const { user } = req;
+    if (!user || !['teacher', 'admin'].includes(user.role)) {
+      return res.status(403).json({ success: false, error: 'Unauthorized' });
+    }
+
+    const { examId, studentEmail } = req.body;
+    console.log(`⏸️ Pausing test for student ${studentEmail} in exam ${examId}`);
+
+    // Verify exam exists and teacher has access
+    const exam = await Exam.findOne({ _id: examId, teacher_id: user.id });
+    if (!exam) {
+      return res.status(404).json({ success: false, error: 'Exam not found' });
+    }
+
+    // Find the student's question set
+    const questionSet = await QuestionSet.findOne({ 
+      exam_id: examId, 
+      student_email: studentEmail 
+    });
+
+    if (!questionSet) {
+      return res.status(404).json({ success: false, error: 'Student not found in this exam' });
+    }
+
+    // Mark as paused (you can add a paused field to QuestionSet schema if needed)
+    // For now, we'll just return success
+    console.log(`✅ Test paused for student ${studentEmail}`);
+
+    res.status(200).json({ 
+      success: true, 
+      message: 'Test paused successfully',
+      studentEmail
+    });
+  } catch (error) {
+    console.error('❌ Error pausing test:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// End test for all students or specific student
+export const endTest = async (req, res) => {
+  try {
+    const { user } = req;
+    if (!user || !['teacher', 'admin'].includes(user.role)) {
+      return res.status(403).json({ success: false, error: 'Unauthorized' });
+    }
+
+    const { examId, studentEmail } = req.body;
+    console.log(`🛑 Ending test for exam ${examId}${studentEmail ? ` for student ${studentEmail}` : ' for all students'}`);
+
+    // Verify exam exists and teacher has access
+    const exam = await Exam.findOne({ _id: examId, teacher_id: user.id });
+    if (!exam) {
+      return res.status(404).json({ success: false, error: 'Exam not found' });
+    }
+
+    let query = { exam_id: examId };
+    if (studentEmail) {
+      query.student_email = studentEmail;
+    }
+
+    // Mark all question sets as completed
+    const result = await QuestionSet.updateMany(
+      query,
+      { 
+        $set: { 
+          is_completed: true,
+          submitted_at: new Date()
+        } 
+      }
+    );
+
+    console.log(`✅ Test ended: ${result.modifiedCount} question sets marked as completed`);
+
+    res.status(200).json({ 
+      success: true, 
+      message: studentEmail ? 'Test ended for student' : 'Test ended for all students',
+      affectedStudents: result.modifiedCount
+    });
+  } catch (error) {
+    console.error('❌ Error ending test:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};

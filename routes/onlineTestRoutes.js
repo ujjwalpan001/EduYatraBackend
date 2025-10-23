@@ -17,7 +17,10 @@ import {
   getExamAnalysis,
   getExamParticipants,
   getAllStudentsForAnalysis,
-  getStudentDetailedAnalysis
+  getStudentDetailedAnalysis,
+  getTestMonitoringData,
+  pauseStudentTest,
+  endTest
 } from '../controllers/onlineTestController.js';
 import { authenticateToken } from '../middleware/auth.js';
 import Class from '../models/Class.js';
@@ -134,6 +137,12 @@ router.get('/:id/test-save', authenticateToken, async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+// Monitoring and control routes
+router.get('/:examId/monitor', authenticateToken, getTestMonitoringData);
+router.post('/pause-test', authenticateToken, pauseStudentTest);
+router.post('/end-test', authenticateToken, endTest);
+
 router.get('/:id/questions', authenticateToken, getExamQuestions); // Add missing route
 
 export default router;
