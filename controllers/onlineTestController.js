@@ -975,13 +975,15 @@ export const submitTest = async (req, res) => {
       return res.status(403).json({ success: false, error: 'Unauthorized' });
     }
 
-    const { examId, testName, answers, score, reason, timeSpentSeconds } = req.body;
+    const { examId, testName, answers, score, reason, timeSpentSeconds, tabSwitches = 0, fullscreenExits = 0 } = req.body;
 
     console.log('\n📝 Test Submission Request:');
     console.log(`   Student: ${user.email}`);
     console.log(`   Exam ID: ${examId}`);
     console.log(`   Score: ${score}`);
     console.log(`   Time Spent: ${timeSpentSeconds}s`);
+    console.log(`   Tab Switches: ${tabSwitches}`);
+    console.log(`   Fullscreen Exits: ${fullscreenExits}`);
 
     if (!examId || !mongoose.Types.ObjectId.isValid(examId)) {
       return res.status(400).json({ success: false, error: 'Invalid exam ID' });
@@ -1067,6 +1069,8 @@ export const submitTest = async (req, res) => {
       percentage: percentage,
       time_spent_seconds: timeSpentSeconds || 0,
       submission_reason: reason || 'Manual submission',
+      tab_switches: tabSwitches,
+      fullscreen_exits: fullscreenExits,
       submitted_at: new Date()
     });
 
@@ -1704,7 +1708,7 @@ export const getTestMonitoringData = async (req, res) => {
     // Get all test submissions for this exam
     const submissions = await TestSubmission.find({ exam_id: examId })
       .populate('student_id', 'first_name last_name email')
-      .select('student_id score percentage time_spent_seconds submitted_at')
+      .select('student_id score percentage time_spent_seconds submitted_at tab_switches fullscreen_exits')
       .lean();
 
     // Get students from the class
@@ -1748,8 +1752,9 @@ export const getTestMonitoringData = async (req, res) => {
         totalQuestions: exam.number_of_questions_per_set,
         proctoring: {
           webcamEnabled: true,
-          tabSwitches: 0,
-          suspiciousActivity: 0,
+          tabSwitches: studentSubmission?.tab_switches || 0,
+          fullscreenExits: studentSubmission?.fullscreen_exits || 0,
+          suspiciousActivity: (studentSubmission?.tab_switches || 0) + (studentSubmission?.fullscreen_exits || 0),
           lastActivity: studentQuestionSet ? 'Active' : 'Not Started'
         },
         answers: {

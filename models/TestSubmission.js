@@ -49,6 +49,14 @@ const testSubmissionSchema = new mongoose.Schema({
     type: String,
     default: 'Manual submission'
   },
+  tab_switches: {
+    type: Number,
+    default: 0
+  },
+  fullscreen_exits: {
+    type: Number,
+    default: 0
+  },
   submitted_at: {
     type: Date,
     default: Date.now
