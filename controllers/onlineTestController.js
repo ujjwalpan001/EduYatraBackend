@@ -816,7 +816,8 @@ export const getExamQuestions = async (req, res) => {
       return res.status(200).json({ 
         success: true, 
         questions: formattedQuestions,
-        setNumber: questionSet.set_number 
+        setNumber: questionSet.set_number,
+        instructions: exam.description || ''  // Include exam instructions
       });
 
     } else if (user.role !== 'admin' && exam.teacher_id.toString() !== user.id) {
@@ -843,7 +844,11 @@ export const getExamQuestions = async (req, res) => {
       difficulty_rating: q.difficulty_rating,
     }));
 
-    res.status(200).json({ success: true, questions: formattedQuestions });
+    res.status(200).json({ 
+      success: true, 
+      questions: formattedQuestions,
+      instructions: exam.description || ''  // Include exam instructions
+    });
   } catch (error) {
     console.error('Error fetching exam questions:', error);
     res.status(500).json({ success: false, error: `Server error: ${error.message}` });
