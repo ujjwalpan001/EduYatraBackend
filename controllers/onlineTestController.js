@@ -47,23 +47,36 @@ const createUniqueQuestionSets = async (exam, students) => {
     console.log(`   - Questions needed: ${totalQuestionsNeeded}`);
     console.log(`   - Questions available: ${question_ids.length}`);
     
-    if (question_ids.length < totalQuestionsNeeded) {
-      const error = `Not enough questions. Need ${totalQuestionsNeeded}, but only ${question_ids.length} available`;
+    // Check if we need to repeat questions
+    if (question_ids.length < number_of_questions_per_set) {
+      const error = `Not enough questions for even one set. Need at least ${number_of_questions_per_set}, but only ${question_ids.length} available`;
       console.error(`❌ ${error}`);
       throw new Error(error);
     }
-    console.log(`   ✅ Sufficient questions available`);
+    
+    if (question_ids.length < totalQuestionsNeeded) {
+      console.log(`   ⚠️ WARNING: Not enough unique questions for all sets`);
+      console.log(`   ℹ️ Will repeat questions across sets to meet requirement`);
+      console.log(`   ℹ️ Each set will still have ${number_of_questions_per_set} questions`);
+    } else {
+      console.log(`   ✅ Sufficient questions available for unique sets`);
+    }
 
 
     // Shuffle questions to randomize
     const shuffledQuestions = [...question_ids].sort(() => Math.random() - 0.5);
 
-    // Split questions into sets
+    // Split questions into sets (with repetition if needed)
     const questionSets = [];
     for (let i = 0; i < number_of_sets; i++) {
-      const start = i * number_of_questions_per_set;
-      const end = start + number_of_questions_per_set;
-      questionSets.push(shuffledQuestions.slice(start, end));
+      const setQuestions = [];
+      for (let j = 0; j < number_of_questions_per_set; j++) {
+        // Use modulo to repeat questions if we don't have enough
+        const questionIndex = (i * number_of_questions_per_set + j) % shuffledQuestions.length;
+        setQuestions.push(shuffledQuestions[questionIndex]);
+      }
+      questionSets.push(setQuestions);
+      console.log(`   Set ${i + 1}: ${setQuestions.length} questions assigned`);
     }
 
     // Delete any existing question sets for this exam
