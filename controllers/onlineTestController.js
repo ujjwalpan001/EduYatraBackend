@@ -309,7 +309,7 @@ export const getAssignedExams = async (req, res) => {
       class_id: { $in: classIds },
       is_published: true, // Only show published exams
       deleted_at: null,
-    }).select('_id title duration_minutes number_of_questions_per_set description start_time end_time expiring_hours instructions').lean();
+    }).select('_id title duration_minutes number_of_questions_per_set description start_time end_time expiring_hours').lean();
 
     console.log(`Fetched ${exams.length} exams for student ${user.email}:`, exams);
 
@@ -375,7 +375,7 @@ export const getAssignedExams = async (req, res) => {
         category: 'Unknown', // Add category field to Exam model if needed
         duration_minutes: exam.duration_minutes,
         numberOfQuestionsPerSet: exam.number_of_questions_per_set,
-        instructions: exam.instructions || '',
+        instructions: exam.description || '', // Use description field from database
       };
     });
 
@@ -510,20 +510,18 @@ export const getAllExams = async (req, res) => {
     // Filter exams based on user role
     let query = { 
       deleted_at: null,
-      $or: [
-        { is_ended: { $exists: false } },  // Include exams where is_ended field doesn't exist (old exams)
-        { is_ended: false }                // Include exams that are not ended
-      ]
+      // Teachers should see ALL exams (including ended ones) so they can reassign them
+      // Only filter out actually deleted exams
     };
     
     if (user.role === 'teacher') {
-      // Teachers only see their own exams that are not ended
+      // Teachers see all their own exams (both active and ended)
       query.teacher_id = user.id;
     } else if (user.role === 'student') {
       // Students shouldn't access this endpoint, but if they do, return empty
       return res.status(403).json({ success: false, error: 'Students cannot access all exams' });
     }
-    // Admin sees all non-ended exams (no additional filter)
+    // Admin sees all exams (no additional filter)
 
     const exams = await Exam.find(query)
       .populate('teacher_id', 'fullName email')
