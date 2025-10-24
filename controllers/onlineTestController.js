@@ -431,7 +431,7 @@ export const createExam = async (req, res) => {
     if (!title || !title.trim()) {
       return res.status(400).json({ success: false, error: "Title is required" });
     }
-    if (!mongoose.Types.ObjectId.isValid(class_id)) {
+    if (class_id && !mongoose.Types.ObjectId.isValid(class_id)) {
       return res.status(400).json({ success: false, error: "Invalid class ID" });
     }
     if (!mongoose.Types.ObjectId.isValid(question_bank_id)) {

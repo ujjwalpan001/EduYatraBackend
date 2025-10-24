@@ -12,7 +12,7 @@ const examSchema = new mongoose.Schema({
   class_id: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Class',
-    required: true
+    required: false  // Made optional - can be assigned later via assignGroup
   },
   teacher_id: {
     type: mongoose.Schema.Types.ObjectId,
