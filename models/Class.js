@@ -34,7 +34,7 @@ const classSchema = new mongoose.Schema({
   students: [{
     name: { type: String, required: true },
     email: { type: String, required: true },
-    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: false },
     isSelected: { type: Boolean, default: true },
   }],
   is_active: {

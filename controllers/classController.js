@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import bcrypt from 'bcryptjs';
 import Class from '../models/Class.js';
 import ClassStudent from '../models/ClassStudent.js';
 import User from '../models/User.js';
@@ -34,6 +35,107 @@ export const createClass = async (req, res) => {
       return res.status(400).json({ success: false, error: 'Missing required fields' });
     }
 
+    console.log(`📝 Creating class: ${class_name} with ${students?.length || 0} students`);
+
+    // Process students - find or create user accounts
+    const processedStudents = [];
+    const classStudentEntries = [];
+    
+    if (students && students.length > 0) {
+      for (const student of students) {
+        if (!student.name || !student.email) {
+          console.warn(`⚠️ Skipping student with missing name or email:`, student);
+          continue;
+        }
+
+        let studentUser = null;
+        
+        // Try to find existing user by userId first
+        if (student.userId && mongoose.Types.ObjectId.isValid(student.userId)) {
+          studentUser = await User.findById(student.userId);
+        }
+        
+        // If not found by userId, try by email
+        if (!studentUser && student.email) {
+          studentUser = await User.findOne({ email: student.email });
+        }
+        
+        // If user still not found, create a new student account
+        if (!studentUser) {
+          try {
+            // Generate username from email (before @ symbol)
+            const username = student.email.split('@')[0];
+            
+            // Generate a random password and hash it
+            const tempPassword = Math.random().toString(36).slice(-10);
+            const salt = await bcrypt.genSalt(10);
+            const hashedPassword = await bcrypt.hash(tempPassword, salt);
+            
+            studentUser = new User({
+              username: username,
+              email: student.email,
+              role: 'student',
+              password: hashedPassword,
+              email_verified: false,
+              created_at: new Date(),
+              updated_at: new Date()
+            });
+            await studentUser.save();
+            console.log(`✅ Created new student user: ${student.email} (username: ${username})`);
+          } catch (createError) {
+            console.error(`❌ Failed to create user for ${student.email}:`, createError);
+            console.error(`❌ Error details:`, createError.message);
+            // If username already exists, try with a random suffix
+            if (createError.code === 11000) {
+              try {
+                const randomSuffix = Math.random().toString(36).substring(2, 6);
+                const altUsername = `${student.email.split('@')[0]}_${randomSuffix}`;
+                
+                // Generate a random password and hash it
+                const tempPassword = Math.random().toString(36).slice(-10);
+                const salt = await bcrypt.genSalt(10);
+                const hashedPassword = await bcrypt.hash(tempPassword, salt);
+                
+                studentUser = new User({
+                  username: altUsername,
+                  email: student.email,
+                  role: 'student',
+                  password: hashedPassword,
+                  email_verified: false,
+                  created_at: new Date(),
+                  updated_at: new Date()
+                });
+                await studentUser.save();
+                console.log(`✅ Created new student user with alternate username: ${student.email} (username: ${altUsername})`);
+              } catch (retryError) {
+                console.error(`❌ Failed to create user even with alternate username:`, retryError.message);
+                continue;
+              }
+            } else {
+              continue;
+            }
+          }
+        }
+
+        // Add to processed students array with valid userId
+        processedStudents.push({
+          name: student.name,
+          email: student.email,
+          userId: studentUser._id,
+          isSelected: student.isSelected !== undefined ? student.isSelected : true
+        });
+
+        // Prepare ClassStudent entry
+        classStudentEntries.push({
+          class_id: null, // Will be set after class is created
+          student_id: studentUser._id,
+          joined_at: new Date(),
+          is_active: true
+        });
+      }
+    }
+
+    // Create the class with processed students
     const classDoc = new Class({
       class_name,
       invitation_code,
@@ -41,51 +143,34 @@ export const createClass = async (req, res) => {
       course_id,
       teacher_id: user.id,
       max_students: max_students || null,
-      students: students || [],
+      students: processedStudents,
       created_at: new Date(),
       updated_at: new Date(),
     });
 
     await classDoc.save();
+    console.log(`✅ Created class: ${classDoc._id}`);
     
-    // Also create ClassStudent entries for each student
-    if (students && students.length > 0) {
-      const classStudentEntries = [];
+    // Create ClassStudent entries with the class_id
+    if (classStudentEntries.length > 0) {
+      classStudentEntries.forEach(entry => {
+        entry.class_id = classDoc._id;
+      });
       
-      for (const student of students) {
-        // Find the user by email or userId
-        let studentUser = null;
-        
-        if (student.userId) {
-          studentUser = await User.findById(student.userId);
-        }
-        
-        if (!studentUser && student.email) {
-          studentUser = await User.findOne({ email: student.email });
-        }
-        
-        if (studentUser) {
-          // Create ClassStudent entry only if student user exists
-          classStudentEntries.push({
-            class_id: classDoc._id,
-            student_id: studentUser._id,
-            joined_at: new Date(),
-            is_active: true
-          });
-        } else {
-          console.warn(`⚠️ Student user not found for: ${student.email || student.userId}`);
-        }
-      }
-      
-      if (classStudentEntries.length > 0) {
+      try {
         await ClassStudent.insertMany(classStudentEntries, { ordered: false });
         console.log(`✅ Created ${classStudentEntries.length} ClassStudent entries for class ${classDoc._id}`);
+      } catch (insertError) {
+        console.warn(`⚠️ Some ClassStudent entries may already exist:`, insertError.message);
       }
     }
     
     return res.status(201).json({ success: true, class: classDoc });
   } catch (error) {
     console.error('❌ Error creating class:', error);
+    if (error.code === 11000) {
+      return res.status(400).json({ success: false, error: 'Invitation code already exists. Please use a unique code.' });
+    }
     return res.status(500).json({ success: false, error: `Failed to create class: ${error.message}` });
   }
 };

@@ -480,16 +480,22 @@ export const getAllExams = async (req, res) => {
     }
 
     // Filter exams based on user role
-    let query = { deleted_at: null };
+    let query = { 
+      deleted_at: null,
+      $or: [
+        { is_ended: { $exists: false } },  // Include exams where is_ended field doesn't exist (old exams)
+        { is_ended: false }                // Include exams that are not ended
+      ]
+    };
     
     if (user.role === 'teacher') {
-      // Teachers only see their own exams
+      // Teachers only see their own exams that are not ended
       query.teacher_id = user.id;
     } else if (user.role === 'student') {
       // Students shouldn't access this endpoint, but if they do, return empty
       return res.status(403).json({ success: false, error: 'Students cannot access all exams' });
     }
-    // Admin sees all exams (no additional filter)
+    // Admin sees all non-ended exams (no additional filter)
 
     const exams = await Exam.find(query)
       .populate('teacher_id', 'fullName email')
@@ -1855,6 +1861,20 @@ export const endTest = async (req, res) => {
         } 
       }
     );
+
+    // If ending test for all students, mark the exam as ended
+    if (!studentEmail) {
+      await Exam.updateOne(
+        { _id: examId },
+        { 
+          $set: { 
+            is_ended: true,
+            manually_ended_at: new Date()
+          } 
+        }
+      );
+      console.log(`✅ Exam ${examId} marked as ended`);
+    }
 
     console.log(`✅ Test ended: ${result.modifiedCount} question sets marked as completed`);
 

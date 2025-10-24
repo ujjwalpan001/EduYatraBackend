@@ -54,6 +54,14 @@ const examSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  is_ended: {
+    type: Boolean,
+    default: false
+  },
+  manually_ended_at: {
+    type: Date,
+    default: null
+  },
   allow_review: {
     type: Boolean,
     default: false
