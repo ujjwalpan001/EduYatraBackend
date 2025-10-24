@@ -309,7 +309,7 @@ export const getAssignedExams = async (req, res) => {
       class_id: { $in: classIds },
       is_published: true, // Only show published exams
       deleted_at: null,
-    }).select('_id title duration_minutes number_of_questions_per_set description start_time end_time').lean();
+    }).select('_id title duration_minutes number_of_questions_per_set description start_time end_time expiring_hours').lean();
 
     console.log(`Fetched ${exams.length} exams for student ${user.email}:`, exams);
 
@@ -341,6 +341,11 @@ export const getAssignedExams = async (req, res) => {
 
     const formattedExams = ongoingExams.map(exam => {
       const now = new Date();
+      const startTime = new Date(exam.start_time);
+      const expiringHours = exam.expiring_hours || 1;
+      const expiryTime = new Date(startTime.getTime() + expiringHours * 60 * 60 * 1000);
+      const timeToExpiryMs = expiryTime - now;
+      
       const endTime = new Date(exam.end_time);
       const timeRemainingMs = endTime - now;
       const timeRemaining = timeRemainingMs > 0
@@ -349,6 +354,11 @@ export const getAssignedExams = async (req, res) => {
       const deadline = timeRemainingMs > 0
         ? `${Math.ceil(timeRemainingMs / (1000 * 60 * 24))} days left`
         : 'Expired';
+        
+      const expiringTime = timeToExpiryMs > 0
+        ? `${Math.ceil(timeToExpiryMs / (1000 * 60 * 60))} hours`
+        : 'Expired';
+      
       const progress = 0; // Placeholder: Calculate based on student submissions if implemented
 
       return {
@@ -360,6 +370,8 @@ export const getAssignedExams = async (req, res) => {
         totalQuestions: exam.number_of_questions_per_set || 1,
         completedQuestions: 0, // Placeholder: Update if tracking completions
         timeRemaining,
+        expiringTime,
+        expiringHours,
         category: 'Unknown', // Add category field to Exam model if needed
         duration_minutes: exam.duration_minutes,
         numberOfQuestionsPerSet: exam.number_of_questions_per_set,
@@ -406,6 +418,7 @@ export const createExam = async (req, res) => {
       number_of_sets,
       number_of_questions_per_set,
       duration_minutes,
+      expiring_hours,
       start_time,
       end_time,
       is_published,
@@ -460,6 +473,7 @@ export const createExam = async (req, res) => {
       number_of_sets,
       number_of_questions_per_set,
       duration_minutes,
+      expiring_hours: expiring_hours || 1,
       start_time: start_time ? new Date(start_time) : undefined,
       end_time: end_time ? new Date(end_time) : undefined,
       is_published: is_published || false,
@@ -597,11 +611,12 @@ export const assignGroup = async (req, res) => {
     console.log(`${'#'.repeat(80)}`);
     
     const { id } = req.params; // Exam ID
-    const { groupId } = req.body; // Class ID
+    const { groupId, expiring_hours } = req.body; // Class ID and expiring hours
     
     console.log(`📋 Request Details:`);
     console.log(`   - Exam ID: ${id}`);
     console.log(`   - Class ID: ${groupId}`);
+    console.log(`   - Expiring Hours: ${expiring_hours}`);
     
     if (!mongoose.Types.ObjectId.isValid(id) || !mongoose.Types.ObjectId.isValid(groupId)) {
       console.error(`❌ Invalid ID format`);
@@ -631,6 +646,10 @@ export const assignGroup = async (req, res) => {
     console.log(`\n💾 Updating exam...`);
     exam.class_id = groupId;
     exam.is_published = true;
+    if (expiring_hours !== undefined && expiring_hours !== null) {
+      exam.expiring_hours = expiring_hours;
+      console.log(`   - Expiring hours set to: ${expiring_hours}`);
+    }
     await exam.save();
     console.log(`✅ Exam updated and published`);
     

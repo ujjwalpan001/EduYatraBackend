@@ -50,6 +50,11 @@ const examSchema = new mongoose.Schema({
     type: Date,
     required: true
   },
+  expiring_hours: {
+    type: Number,
+    default: 1,
+    min: 0
+  },
   is_published: {
     type: Boolean,
     default: false
