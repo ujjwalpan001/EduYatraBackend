@@ -302,16 +302,26 @@ export const getAssignedExams = async (req, res) => {
 
     // Get question sets for this student to check completion status
     const examIds = exams.map(e => e._id);
+    console.log(`\n🔍 Checking completion status for ${examIds.length} exams...`);
+    console.log(`   Student email: ${user.email}`);
+    
     const questionSets = await QuestionSet.find({
       exam_id: { $in: examIds },
       student_email: user.email
     }).select('exam_id is_completed').lean();
+
+    console.log(`   Found ${questionSets.length} question sets for this student`);
+    questionSets.forEach((qs, index) => {
+      console.log(`   [${index + 1}] Exam ID: ${qs.exam_id}, is_completed: ${qs.is_completed}`);
+    });
 
     const completedExamIds = new Set(
       questionSets
         .filter(qs => qs.is_completed)
         .map(qs => qs.exam_id.toString())
     );
+
+    console.log(`   📊 Completed exam IDs: ${Array.from(completedExamIds).join(', ') || 'None'}`);
 
     // Filter out completed exams - only show ongoing ones
     const ongoingExams = exams.filter(exam => !completedExamIds.has(exam._id.toString()));
@@ -1008,9 +1018,22 @@ export const submitTest = async (req, res) => {
     const percentage = totalQuestions > 0 ? (correctAnswers / totalQuestions) * 100 : 0;
 
     // Mark question set as completed
+    console.log(`\n🔄 Marking QuestionSet as completed...`);
+    console.log(`   QuestionSet ID: ${questionSet._id}`);
+    console.log(`   Exam ID: ${examId}`);
+    console.log(`   Student Email: ${user.email}`);
+    console.log(`   Before: is_completed = ${questionSet.is_completed}`);
+    
     questionSet.is_completed = true;
     questionSet.completed_at = new Date();
-    await questionSet.save();
+    const savedQuestionSet = await questionSet.save();
+    
+    console.log(`   After save: is_completed = ${savedQuestionSet.is_completed}`);
+    console.log(`   ✅ QuestionSet marked as completed and saved successfully!`);
+
+    // Verify the save by re-querying
+    const verifyQuestionSet = await QuestionSet.findById(questionSet._id).lean();
+    console.log(`   ✅ Verification: is_completed in DB = ${verifyQuestionSet?.is_completed}`);
 
     // Create test submission record
     const testSubmission = new TestSubmission({
