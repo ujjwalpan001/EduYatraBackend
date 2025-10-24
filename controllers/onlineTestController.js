@@ -309,7 +309,7 @@ export const getAssignedExams = async (req, res) => {
       class_id: { $in: classIds },
       is_published: true, // Only show published exams
       deleted_at: null,
-    }).select('_id title duration_minutes number_of_questions_per_set description start_time end_time expiring_hours').lean();
+    }).select('_id title duration_minutes number_of_questions_per_set description start_time end_time expiring_hours instructions').lean();
 
     console.log(`Fetched ${exams.length} exams for student ${user.email}:`, exams);
 
@@ -375,6 +375,7 @@ export const getAssignedExams = async (req, res) => {
         category: 'Unknown', // Add category field to Exam model if needed
         duration_minutes: exam.duration_minutes,
         numberOfQuestionsPerSet: exam.number_of_questions_per_set,
+        instructions: exam.instructions || '',
       };
     });
 
