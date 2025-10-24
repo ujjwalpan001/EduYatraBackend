@@ -44,11 +44,11 @@ const examSchema = new mongoose.Schema({
   },
   start_time: {
     type: Date,
-    required: true
+    required: false  // Optional - set when exam is assigned to group
   },
   end_time: {
     type: Date,
-    required: true
+    required: false  // Optional - set when exam is assigned to group
   },
   expiring_hours: {
     type: Number,

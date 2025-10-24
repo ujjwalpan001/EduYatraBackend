@@ -646,10 +646,23 @@ export const assignGroup = async (req, res) => {
     console.log(`\n💾 Updating exam...`);
     exam.class_id = groupId;
     exam.is_published = true;
+    
+    // Set start_time to now and end_time based on expiring_hours
+    const now = new Date();
+    exam.start_time = now;
+    
+    // Calculate end_time based on expiring_hours
+    const expiringHoursValue = expiring_hours !== undefined && expiring_hours !== null ? expiring_hours : 1;
+    const endTime = new Date(now.getTime() + expiringHoursValue * 60 * 60 * 1000);
+    exam.end_time = endTime;
+    
     if (expiring_hours !== undefined && expiring_hours !== null) {
       exam.expiring_hours = expiring_hours;
       console.log(`   - Expiring hours set to: ${expiring_hours}`);
     }
+    console.log(`   - Start time: ${exam.start_time.toISOString()}`);
+    console.log(`   - End time: ${exam.end_time.toISOString()}`);
+    
     await exam.save();
     console.log(`✅ Exam updated and published`);
     
