@@ -1906,3 +1906,52 @@ export const endTest = async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 };
+
+// Delete exam (soft delete)
+export const deleteExam = async (req, res) => {
+  try {
+    const { user } = req;
+    if (!user || !['teacher', 'admin'].includes(user.role)) {
+      return res.status(403).json({ success: false, error: 'Unauthorized' });
+    }
+
+    const { examId } = req.params;
+    console.log(`🗑️ Deleting exam ${examId} by ${user.email}`);
+
+    // Verify exam exists and teacher has access
+    const exam = await Exam.findOne({ _id: examId, teacher_id: user.id });
+    if (!exam) {
+      return res.status(404).json({ success: false, error: 'Exam not found or access denied' });
+    }
+
+    // Soft delete the exam
+    await Exam.updateOne(
+      { _id: examId },
+      { 
+        $set: { 
+          deleted_at: new Date()
+        } 
+      }
+    );
+
+    // Also soft delete associated question sets
+    await QuestionSet.updateMany(
+      { exam_id: examId },
+      { 
+        $set: { 
+          deleted_at: new Date()
+        } 
+      }
+    );
+
+    console.log(`✅ Exam ${examId} soft deleted successfully`);
+
+    res.status(200).json({ 
+      success: true, 
+      message: 'Exam deleted successfully'
+    });
+  } catch (error) {
+    console.error('❌ Error deleting exam:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};

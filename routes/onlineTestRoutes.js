@@ -20,7 +20,8 @@ import {
   getStudentDetailedAnalysis,
   getTestMonitoringData,
   pauseStudentTest,
-  endTest
+  endTest,
+  deleteExam
 } from '../controllers/onlineTestController.js';
 import { authenticateToken } from '../middleware/auth.js';
 import Class from '../models/Class.js';
@@ -142,6 +143,7 @@ router.get('/:id/test-save', authenticateToken, async (req, res) => {
 router.get('/:examId/monitor', authenticateToken, getTestMonitoringData);
 router.post('/pause-test', authenticateToken, pauseStudentTest);
 router.post('/end-test', authenticateToken, endTest);
+router.delete('/:examId', authenticateToken, deleteExam);
 
 router.get('/:id/questions', authenticateToken, getExamQuestions); // Add missing route
 
