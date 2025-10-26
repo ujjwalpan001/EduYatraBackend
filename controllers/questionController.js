@@ -191,7 +191,7 @@ export const getQuestionsByQuestionBank = async (req, res) => {
     }
 
     const questions = await Question.find({ question_bank_id: questionBankId, deleted_at: null })
-      .select('_id latex_code katex_code question_type difficulty_rating subject correct_option_latex correct_option_katex incorrect_option_latex incorrect_option_katex topic Sub_topic');
+      .select('_id latex_code katex_code question_type difficulty_rating subject correct_option_latex correct_option_katex incorrect_option_latex incorrect_option_katex solution_latex katex_solution topic Sub_topic');
 
     console.log(`✅ Found ${questions.length} questions for bank ${questionBankId}`);
     
