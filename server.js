@@ -37,7 +37,10 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
+    // Allow requests with no origin (like mobile apps or Postman)
+    if (!origin) {
+      callback(null, true);
+    } else if (allowedOrigins.includes(origin) || origin.startsWith('http://10.1.168.') || origin.startsWith('http://192.168.')) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));

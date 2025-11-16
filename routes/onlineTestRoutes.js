@@ -74,7 +74,7 @@ router.get('/questions', authenticateToken, async (req, res) => {
       return res.status(400).json({ success: false, error: 'Valid questionBankId is required' });
     }
     const questions = await Question.find({ question_bank_id: questionBankId, deleted_at: null })
-      .select('_id latex_code question_type difficulty_rating');
+      .select('_id latex_code text question_type difficulty_rating');
     res.status(200).json({ success: true, questions });
   } catch (error) {
     console.error("❌ Error fetching questions:", error);
