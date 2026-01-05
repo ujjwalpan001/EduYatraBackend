@@ -28,7 +28,7 @@ connectDB();
 
 // CORS configuration
 const allowedOrigins = [
-  'http://localhost:3000',
+  'https://www.deskoros.tech',
   'http://192.168.29.184:8080', // Added for frontend
   'http://localhost:8080',
   'https://edu-yatra.vercel.app', // Added for production
