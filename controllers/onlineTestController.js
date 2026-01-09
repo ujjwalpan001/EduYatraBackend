@@ -252,7 +252,7 @@ const createUniqueQuestionSets = async (exam, students) => {
     // Verify questions were saved in QuestionSetQuestion collection
     const savedQuestionSets = await QuestionSet.find({ exam_id: examId }).select('_id set_number student_email');
     const questionSetIds = savedQuestionSets.map(qs => qs._id);
-    const totalQuestionsInSets = await QuestionSetQuestion.countDocuments({ 
+const totalQuestionsInSets = await QuestionSetQuestion.countDocuments({ 
       questionset_id: { $in: questionSetIds } 
     });
     
@@ -1020,6 +1020,8 @@ export const submitTest = async (req, res) => {
     console.log(`   Time Spent: ${timeSpentSeconds}s`);
     console.log(`   Tab Switches: ${tabSwitches}`);
     console.log(`   Fullscreen Exits: ${fullscreenExits}`);
+    console.log(`   Answers received (sample):`, Object.keys(answers || {}).length > 0 ? 
+      { firstKey: Object.keys(answers)[0], firstValue: answers[Object.keys(answers)[0]] } : 'No answers');
 
     if (!examId || !mongoose.Types.ObjectId.isValid(examId)) {
       return res.status(400).json({ success: false, error: 'Invalid exam ID' });
@@ -1058,19 +1060,70 @@ export const submitTest = async (req, res) => {
 
     const totalQuestions = questionSetQuestions.length;
 
-    // Calculate correct answers
+    // Calculate correct answers and prepare structured answer data
     const questionIds = questionSetQuestions.map(qsq => qsq.question_id);
     const questions = await Question.find({
       _id: { $in: questionIds },
       deleted_at: null
     });
 
-    let correctAnswers = 0;
+    // Create a map of question ID to question data for easy lookup
+    const questionMap = new Map();
     questions.forEach(q => {
-      if (answers[q._id.toString()] === q.correct_option_latex) {
+      questionMap.set(q._id.toString(), q);
+    });
+
+    let correctAnswers = 0;
+    const structuredAnswers = new Map();
+
+    // Process each answer
+    for (const [questionId, answer] of Object.entries(answers)) {
+      const question = questionMap.get(questionId);
+      if (!question) {
+        console.warn(`⚠️ Question ${questionId} not found in database`);
+        continue;
+      }
+
+      // Build all options array
+      const allOptions = [...(question.incorrect_option_latex || []), question.correct_option_latex];
+      
+      // Determine what format the answer is in
+      let selectedOptionText = '';
+      let selectedOptionLetter = '';
+      let selectedOptionIndex = -1;
+
+      if (typeof answer === 'string') {
+        // Check if it's a letter (A, B, C, D) or the actual option text
+        if (answer.length === 1 && /[A-Z]/.test(answer)) {
+          // It's a letter like "A", "B", "C", "D"
+          selectedOptionLetter = answer;
+          selectedOptionIndex = answer.charCodeAt(0) - 65; // A=0, B=1, C=2, D=3
+          selectedOptionText = allOptions[selectedOptionIndex] || '';
+        } else {
+          // It's the actual option text
+          selectedOptionText = answer;
+          selectedOptionIndex = allOptions.indexOf(answer);
+          selectedOptionLetter = selectedOptionIndex >= 0 ? String.fromCharCode(65 + selectedOptionIndex) : '';
+        }
+      }
+
+      // Store structured answer data
+      structuredAnswers.set(questionId, {
+        selectedOption: selectedOptionLetter,
+        selectedOptionText: selectedOptionText,
+        selectedOptionIndex: selectedOptionIndex,
+        isCorrect: selectedOptionText === question.correct_option_latex
+      });
+
+      // Count correct answers
+      if (selectedOptionText === question.correct_option_latex) {
         correctAnswers++;
       }
-    });
+    }
+
+    console.log(`   📊 Answer Processing Complete:`);
+    console.log(`      Total answers processed: ${structuredAnswers.size}`);
+    console.log(`      Correct answers: ${correctAnswers}/${totalQuestions}`);
 
     const percentage = totalQuestions > 0 ? (correctAnswers / totalQuestions) * 100 : 0;
 
@@ -1092,13 +1145,13 @@ export const submitTest = async (req, res) => {
     const verifyQuestionSet = await QuestionSet.findById(questionSet._id).lean();
     console.log(`   ✅ Verification: is_completed in DB = ${verifyQuestionSet?.is_completed}`);
 
-    // Create test submission record
+    // Create test submission record with structured answers
     const testSubmission = new TestSubmission({
       exam_id: examId,
       student_id: user.id,
       student_email: user.email,
       question_set_id: questionSet._id,
-      answers: answers,
+      answers: structuredAnswers,
       score: score,
       total_questions: totalQuestions,
       correct_answers: correctAnswers,
@@ -1241,6 +1294,188 @@ export const getAttendedTests = async (req, res) => {
     console.error('❌ Error fetching attended tests:', error);
     console.error('   Stack:', error.stack);
     return res.status(500).json({ success: false, error: `Failed to fetch attended tests: ${error.message}` });
+  }
+};
+
+/**
+ * Get test answers for a submitted test (for student review)
+ */
+export const getTestAnswers = async (req, res) => {
+  try {
+    const { user } = req;
+    const { submissionId } = req.params;
+    
+    console.log('\n📖 getTestAnswers called');
+    console.log('   User:', user?.email, 'Role:', user?.role);
+    console.log('   Submission ID:', submissionId);
+    
+    if (!user || user.role !== 'student') {
+      console.log('❌ Unauthorized access attempt');
+      return res.status(403).json({ success: false, error: 'Unauthorized' });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(submissionId)) {
+      return res.status(400).json({ success: false, error: 'Invalid submission ID' });
+    }
+
+    // Find the test submission
+    const submission = await TestSubmission.findOne({
+      _id: submissionId,
+      student_email: user.email
+    }).lean();
+
+    if (!submission) {
+      console.log('❌ Submission not found or unauthorized');
+      return res.status(404).json({ success: false, error: 'Submission not found or unauthorized' });
+    }
+
+    console.log(`   Found submission for exam: ${submission.exam_id}`);
+
+    // Get exam details
+    const exam = await Exam.findById(submission.exam_id)
+      .select('title description')
+      .lean();
+
+    if (!exam) {
+      return res.status(404).json({ success: false, error: 'Exam not found' });
+    }
+
+    // Get the question set for this submission
+    const questionSet = await QuestionSet.findById(submission.question_set_id).lean();
+    
+    if (!questionSet) {
+      return res.status(404).json({ success: false, error: 'Question set not found' });
+    }
+
+    // Get all questions from the question set
+    const questionSetQuestions = await QuestionSetQuestion.find({
+      questionset_id: questionSet._id
+    }).lean();
+
+    console.log(`   Found ${questionSetQuestions.length} questions in the set`);
+
+    const questionIds = questionSetQuestions.map(qsq => qsq.question_id);
+
+    // Get all question details
+    const questions = await Question.find({
+      _id: { $in: questionIds },
+      deleted_at: null
+    }).select('latex_code correct_option_latex incorrect_option_latex subject difficulty_rating').lean();
+
+    console.log(`   Retrieved ${questions.length} question details`);
+
+    // Format the questions with answers
+    const formattedQuestions = questions.map(q => {
+      const questionId = q._id.toString();
+      // When using .lean(), Map becomes a plain object, so use bracket notation
+      const answerData = submission.answers ? submission.answers[questionId] : null;
+      const correctAnswer = q.correct_option_latex;
+      
+      // Handle both old format (string) and new format (object)
+      let studentAnswerText = null;
+      let studentAnswerLetter = null;
+      let isCorrect = false;
+
+      if (answerData) {
+        if (typeof answerData === 'object' && answerData.selectedOptionText) {
+          // New structured format
+          studentAnswerText = answerData.selectedOptionText;
+          studentAnswerLetter = answerData.selectedOption;
+          isCorrect = answerData.isCorrect || (studentAnswerText === correctAnswer);
+        } else if (typeof answerData === 'string') {
+          // Old format - could be letter or text
+          if (answerData.length === 1 && /[A-Z]/.test(answerData)) {
+            // It's a letter
+            studentAnswerLetter = answerData;
+            const allOptions = [...(q.incorrect_option_latex || []), correctAnswer];
+            const index = answerData.charCodeAt(0) - 65;
+            studentAnswerText = allOptions[index] || null;
+          } else {
+            // It's the text
+            studentAnswerText = answerData;
+            // Derive the letter from the text
+            const allOptions = [...(q.incorrect_option_latex || []), correctAnswer];
+            const index = allOptions.indexOf(answerData);
+            studentAnswerLetter = index >= 0 ? String.fromCharCode(65 + index) : null;
+          }
+          isCorrect = studentAnswerText === correctAnswer;
+        }
+      }
+      
+      // Build all options array
+      const incorrectOptions = q.incorrect_option_latex || [];
+      const allOptions = correctAnswer ? [...incorrectOptions, correctAnswer] : incorrectOptions;
+      
+      // If we have studentAnswerText but no letter, derive it
+      if (studentAnswerText && !studentAnswerLetter) {
+        const index = allOptions.indexOf(studentAnswerText);
+        if (index >= 0) {
+          studentAnswerLetter = String.fromCharCode(65 + index);
+        }
+      }
+      
+      // Log for debugging
+      if (!correctAnswer) {
+        console.warn(`⚠️ Question ${questionId} has no correct_option_latex`);
+      }
+      
+      // Log sample question for debugging
+      if (questionId === questions[0]?._id.toString()) {
+        console.log('   📝 Sample question:');
+        console.log('      ID:', questionId);
+        console.log('      Correct Answer:', correctAnswer?.substring(0, 50));
+        console.log('      Student Answer Text:', studentAnswerText?.substring(0, 50));
+        console.log('      Student Answer Letter:', studentAnswerLetter);
+        console.log('      Is Correct:', isCorrect);
+        console.log('      Total Options:', allOptions.length);
+      }
+      
+      return {
+        id: questionId,
+        text: q.latex_code || '',
+        options: allOptions,
+        correctAnswer: correctAnswer || '',
+        studentAnswer: studentAnswerText,
+        studentAnswerLetter: studentAnswerLetter,
+        isCorrect: isCorrect,
+        subject: q.subject || 'General',
+        difficulty_rating: q.difficulty_rating || 1
+      };
+    });
+
+    console.log(`✅ Returning ${formattedQuestions.length} questions with answers`);
+    if (formattedQuestions.length > 0) {
+      console.log('   📋 Sample formatted question:', {
+        id: formattedQuestions[0].id,
+        hasText: !!formattedQuestions[0].text,
+        optionsCount: formattedQuestions[0].options.length,
+        hasCorrectAnswer: !!formattedQuestions[0].correctAnswer,
+        hasStudentAnswer: !!formattedQuestions[0].studentAnswer,
+        studentAnswerLetter: formattedQuestions[0].studentAnswerLetter,
+        isCorrect: formattedQuestions[0].isCorrect
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      exam: {
+        title: exam.title,
+        description: exam.description
+      },
+      submission: {
+        score: submission.score,
+        percentage: submission.percentage,
+        correctAnswers: submission.correct_answers,
+        totalQuestions: submission.total_questions,
+        timeSpent: submission.time_spent_seconds,
+        submittedAt: submission.submitted_at
+      },
+      questions: formattedQuestions
+    });
+  } catch (error) {
+    console.error('❌ Error fetching test answers:', error);
+    console.error('   Stack:', error.stack);
+    return res.status(500).json({ success: false, error: `Failed to fetch test answers: ${error.message}` });
   }
 };
 

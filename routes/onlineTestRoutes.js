@@ -13,6 +13,7 @@ import {
   getQuestionSetsDebug,
   submitTest,
   getAttendedTests,
+  getTestAnswers,
   getStudentPerformance,
   getExamAnalysis,
   getExamParticipants,
@@ -49,6 +50,7 @@ router.get('/question-banks', authenticateToken, async (req, res) => {
 });
 router.get('/assigned', authenticateToken, getAssignedExams);
 router.get('/attended-tests', authenticateToken, getAttendedTests); // IMPORTANT: Must be before /:id route
+router.get('/test-answers/:submissionId', authenticateToken, getTestAnswers); // Get answers for a submitted test
 router.get('/student-performance', authenticateToken, getStudentPerformance); // Student performance stats
 router.get('/exam-analysis', authenticateToken, getExamAnalysis); // Teacher exam analysis
 router.get('/students-analysis', authenticateToken, getAllStudentsForAnalysis); // Get all students for analysis

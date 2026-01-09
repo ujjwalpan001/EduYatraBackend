@@ -15,7 +15,7 @@ import Course from './models/Course.js';
 import Institute from './models/Institute.js';
 import Class from './models/Class.js';
 import QuestionSet from './models/QuestionSet.js';
-import QuestionSetQuestion from './models/QuestionSetQues.js';
+import QuestionSetQues from './models/QuestionSetQues.js';
 import TestSubmission from './models/TestSubmission.js';
 import mongoose from 'mongoose';
 

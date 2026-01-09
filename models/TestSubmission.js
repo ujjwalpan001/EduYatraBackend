@@ -22,8 +22,10 @@ const testSubmissionSchema = new mongoose.Schema({
   },
   answers: {
     type: Map,
-    of: String,
-    required: true
+    of: mongoose.Schema.Types.Mixed,
+    required: true,
+    // Each answer will be an object: { selectedOption: 'A', selectedOptionText: 'option text', selectedOptionIndex: 0 }
+    // OR for backward compatibility: just a string (the option text)
   },
   score: {
     type: Number,
