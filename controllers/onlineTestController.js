@@ -1224,7 +1224,7 @@ export const getAttendedTests = async (req, res) => {
     const exams = await Exam.find({
       _id: { $in: examIds },
       deleted_at: null
-    }).select('_id title teacher_id').lean();
+    }).select('_id title teacher_id score_released answers_released').lean();
 
     console.log(`   Found ${exams.length} exams`);
     const examMap = new Map(exams.map(e => [e._id.toString(), e]));
@@ -1246,13 +1246,23 @@ export const getAttendedTests = async (req, res) => {
       const exam = examMap.get(submission.exam_id.toString());
       const teacherName = exam?.teacher_id ? teacherMap.get(exam.teacher_id.toString()) : 'Unknown';
       
-      // Calculate grade based on percentage
+      // Check if score is released (default to false for security)
+      const scoreReleased = exam?.score_released === true;
+      const answersReleased = exam?.answers_released === true;
+      
+      console.log(`   📊 Exam: ${exam?.title}, score_released: ${exam?.score_released}, scoreReleased: ${scoreReleased}`);
+      
+      // Calculate grade based on percentage (only if score is released)
       let grade = 'F';
-      if (submission.percentage >= 90) grade = 'A';
-      else if (submission.percentage >= 80) grade = 'B+';
-      else if (submission.percentage >= 70) grade = 'B';
-      else if (submission.percentage >= 60) grade = 'C';
-      else if (submission.percentage >= 50) grade = 'D';
+      if (scoreReleased) {
+        if (submission.percentage >= 90) grade = 'A';
+        else if (submission.percentage >= 80) grade = 'B+';
+        else if (submission.percentage >= 70) grade = 'B';
+        else if (submission.percentage >= 60) grade = 'C';
+        else if (submission.percentage >= 50) grade = 'D';
+      } else {
+        grade = 'N/A';
+      }
 
       // Format time spent
       const hours = Math.floor(submission.time_spent_seconds / 3600);
@@ -1270,12 +1280,14 @@ export const getAttendedTests = async (req, res) => {
         _id: submission._id,
         examId: submission.exam_id,
         test: exam?.title || 'Unknown Test',
-        score: Math.round(submission.percentage),
+        score: scoreReleased ? Math.round(submission.percentage) : null,
+        scoreReleased: scoreReleased,
+        answersReleased: answersReleased,
         date: date,
         instructor: teacherName,
         grade: grade,
         totalQuestions: submission.total_questions,
-        correctAnswers: submission.correct_answers,
+        correctAnswers: scoreReleased ? submission.correct_answers : null,
         timeSpent: timeSpent,
         submittedAt: submission.submitted_at
       };
@@ -1352,11 +1364,21 @@ export const getTestAnswers = async (req, res) => {
 
     // Get exam details (fetch again with full details if needed for students)
     const exam = await Exam.findById(submission.exam_id)
-      .select('title description')
+      .select('title description answers_released')
       .lean();
 
     if (!exam) {
       return res.status(404).json({ success: false, error: 'Exam not found' });
+    }
+
+    // Check if student is trying to access answers before they're released
+    if (user.role === 'student' && exam.answers_released === false) {
+      console.log('❌ Answers not yet released for this exam');
+      return res.status(403).json({ 
+        success: false, 
+        error: 'Answers have not been released yet',
+        answersReleased: false
+      });
     }
 
     // Get the question set for this submission
@@ -1689,7 +1711,9 @@ export const getExamAnalysis = async (req, res) => {
           status: exam.status || 'Draft',
           participants: totalParticipants,
           avgScore: Math.round(avgScore * 10) / 10,
-          avgTimeSpent: Math.round(avgTimeSpent / 60) // Convert to minutes
+          avgTimeSpent: Math.round(avgTimeSpent / 60), // Convert to minutes
+          score_released: exam.score_released === true, // Explicit true check for security
+          answers_released: exam.answers_released === true // Explicit true check for security
         };
       })
     );
@@ -2269,6 +2293,80 @@ export const deleteExam = async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Error deleting exam:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+/**
+ * Toggle score release for an exam (teacher only)
+ */
+export const toggleScoreRelease = async (req, res) => {
+  try {
+    const { user } = req;
+    if (!user || !['teacher', 'admin'].includes(user.role)) {
+      return res.status(403).json({ success: false, error: 'Unauthorized: Only teachers can toggle score release' });
+    }
+
+    const { examId } = req.params;
+
+    console.log(`🔄 Toggling score release for exam ${examId}`);
+
+    // Verify exam exists and teacher has access
+    const exam = await Exam.findOne({ _id: examId, teacher_id: user.id, deleted_at: null });
+    if (!exam) {
+      return res.status(404).json({ success: false, error: 'Exam not found or access denied' });
+    }
+
+    // Toggle the current value
+    exam.score_released = !exam.score_released;
+    await exam.save();
+
+    console.log(`✅ Score release ${exam.score_released ? 'enabled' : 'disabled'} for exam: ${exam.title}`);
+
+    res.status(200).json({ 
+      success: true, 
+      message: `Score ${exam.score_released ? 'released' : 'hidden'} successfully`,
+      scoreReleased: exam.score_released
+    });
+  } catch (error) {
+    console.error('❌ Error toggling score release:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+/**
+ * Toggle answer release for an exam (teacher only)
+ */
+export const toggleAnswerRelease = async (req, res) => {
+  try {
+    const { user } = req;
+    if (!user || !['teacher', 'admin'].includes(user.role)) {
+      return res.status(403).json({ success: false, error: 'Unauthorized: Only teachers can toggle answer release' });
+    }
+
+    const { examId } = req.params;
+
+    console.log(`🔄 Toggling answer release for exam ${examId}`);
+
+    // Verify exam exists and teacher has access
+    const exam = await Exam.findOne({ _id: examId, teacher_id: user.id, deleted_at: null });
+    if (!exam) {
+      return res.status(404).json({ success: false, error: 'Exam not found or access denied' });
+    }
+
+    // Toggle the current value
+    exam.answers_released = !exam.answers_released;
+    await exam.save();
+
+    console.log(`✅ Answer release ${exam.answers_released ? 'enabled' : 'disabled'} for exam: ${exam.title}`);
+
+    res.status(200).json({ 
+      success: true, 
+      message: `Answers ${exam.answers_released ? 'released' : 'hidden'} successfully`,
+      answersReleased: exam.answers_released
+    });
+  } catch (error) {
+    console.error('❌ Error toggling answer release:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 };

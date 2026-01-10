@@ -22,7 +22,9 @@ import {
   getTestMonitoringData,
   pauseStudentTest,
   endTest,
-  deleteExam
+  deleteExam,
+  toggleScoreRelease,
+  toggleAnswerRelease
 } from '../controllers/onlineTestController.js';
 import { authenticateToken } from '../middleware/auth.js';
 import Class from '../models/Class.js';
@@ -146,6 +148,10 @@ router.get('/:examId/monitor', authenticateToken, getTestMonitoringData);
 router.post('/pause-test', authenticateToken, pauseStudentTest);
 router.post('/end-test', authenticateToken, endTest);
 router.delete('/:examId', authenticateToken, deleteExam);
+
+// Score and answer release control routes (teacher only)
+router.post('/:examId/toggle-score-release', authenticateToken, toggleScoreRelease);
+router.post('/:examId/toggle-answer-release', authenticateToken, toggleAnswerRelease);
 
 router.get('/:id/questions', authenticateToken, getExamQuestions); // Add missing route
 

@@ -79,6 +79,16 @@ const examSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  score_released: {
+    type: Boolean,
+    default: false,
+    comment: 'Controls whether students can see their scores for this exam'
+  },
+  answers_released: {
+    type: Boolean,
+    default: false,
+    comment: 'Controls whether students can view correct answers for this exam'
+  },
   created_at: {
     type: Date,
     default: Date.now
