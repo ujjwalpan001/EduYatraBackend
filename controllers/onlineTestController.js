@@ -62,21 +62,37 @@ const createUniqueQuestionSets = async (exam, students) => {
       console.log(`   ✅ Sufficient questions available for unique sets`);
     }
 
+    // Check shuffle_questions setting from exam
+    const shouldShuffleQuestions = exam.shuffle_questions || false;
+    console.log(`\n🔀 Shuffle Questions Setting: ${shouldShuffleQuestions ? 'ON' : 'OFF'}`);
 
-    // Shuffle questions to randomize
-    const shuffledQuestions = [...question_ids].sort(() => Math.random() - 0.5);
-
-    // Split questions into sets (with repetition if needed)
+    // Split questions into sets based on shuffle setting
     const questionSets = [];
-    for (let i = 0; i < number_of_sets; i++) {
-      const setQuestions = [];
-      for (let j = 0; j < number_of_questions_per_set; j++) {
-        // Use modulo to repeat questions if we don't have enough
-        const questionIndex = (i * number_of_questions_per_set + j) % shuffledQuestions.length;
-        setQuestions.push(shuffledQuestions[questionIndex]);
+    
+    if (shouldShuffleQuestions) {
+      // SHUFFLE ON: Each set gets different questions
+      console.log(`   ✅ Creating ${number_of_sets} DIFFERENT sets (shuffle enabled)`);
+      const shuffledQuestions = [...question_ids].sort(() => Math.random() - 0.5);
+      
+      for (let i = 0; i < number_of_sets; i++) {
+        const setQuestions = [];
+        for (let j = 0; j < number_of_questions_per_set; j++) {
+          // Use modulo to repeat questions if we don't have enough
+          const questionIndex = (i * number_of_questions_per_set + j) % shuffledQuestions.length;
+          setQuestions.push(shuffledQuestions[questionIndex]);
+        }
+        questionSets.push(setQuestions);
+        console.log(`   Set ${i + 1}: ${setQuestions.length} questions (different from other sets)`);
       }
-      questionSets.push(setQuestions);
-      console.log(`   Set ${i + 1}: ${setQuestions.length} questions assigned`);
+    } else {
+      // SHUFFLE OFF: All sets get the SAME questions
+      console.log(`   ✅ Creating ${number_of_sets} IDENTICAL sets (shuffle disabled)`);
+      const sameQuestions = question_ids.slice(0, number_of_questions_per_set);
+      
+      for (let i = 0; i < number_of_sets; i++) {
+        questionSets.push([...sameQuestions]); // Copy same questions to each set
+        console.log(`   Set ${i + 1}: ${sameQuestions.length} questions (identical to all other sets)`);
+      }
     }
 
     // Delete any existing question sets for this exam
@@ -815,10 +831,17 @@ export const getExamQuestions = async (req, res) => {
       const formattedQuestions = questionIds.map(qId => {
         const q = questionMap.get(qId.toString());
         if (!q) return null;
+        
+        // Respect shuffle_options setting
+        const allOptions = [...q.incorrect_option_latex, q.correct_option_latex];
+        const options = exam.shuffle_options 
+          ? allOptions.sort(() => Math.random() - 0.5) // Shuffle if enabled
+          : allOptions; // Keep original order if disabled
+        
         return {
           id: q._id.toString(),
           text: q.latex_code,
-          options: [...q.incorrect_option_latex, q.correct_option_latex].sort(() => Math.random() - 0.5), // Shuffle options
+          options: options,
           correctAnswer: q.correct_option_latex,
           subject: q.subject,
           difficulty_rating: q.difficulty_rating,
@@ -1124,6 +1147,57 @@ export const submitTest = async (req, res) => {
     console.log(`   📊 Answer Processing Complete:`);
     console.log(`      Total answers processed: ${structuredAnswers.size}`);
     console.log(`      Correct answers: ${correctAnswers}/${totalQuestions}`);
+
+    // Update question analytics for adaptive difficulty
+    console.log(`\n📈 Updating question analytics for adaptive difficulty...`);
+    const analyticsUpdates = [];
+    
+    for (const [questionId, answerData] of structuredAnswers) {
+      const question = questionMap.get(questionId);
+      if (!question) continue;
+
+      // Increment usage counter and correct/incorrect counters
+      const timesUsed = (question.times_used || 0) + 1;
+      const timesCorrect = (question.times_correct || 0) + (answerData.isCorrect ? 1 : 0);
+      const timesIncorrect = (question.times_incorrect || 0) + (answerData.isCorrect ? 0 : 1);
+      
+      // Calculate success rate
+      const successRate = timesUsed > 0 ? (timesCorrect / timesUsed) * 100 : 0;
+      
+      // Determine adaptive difficulty based on success rate
+      // High success (>75%) = easy, Medium (40-75%) = medium, Low (<40%) = hard
+      let adaptiveDifficulty = 'medium';
+      if (timesUsed >= 5) { // Only adjust after minimum 5 attempts
+        if (successRate > 75) {
+          adaptiveDifficulty = 'easy';
+        } else if (successRate < 40) {
+          adaptiveDifficulty = 'hard';
+        }
+      }
+
+      analyticsUpdates.push({
+        updateOne: {
+          filter: { _id: questionId },
+          update: {
+            $set: {
+              times_used: timesUsed,
+              times_correct: timesCorrect,
+              times_incorrect: timesIncorrect,
+              success_rate: Math.round(successRate * 100) / 100, // Round to 2 decimals
+              adaptive_difficulty: adaptiveDifficulty
+            }
+          }
+        }
+      });
+
+      console.log(`      Question ${questionId}: Used ${timesUsed}x, Success ${successRate.toFixed(1)}%, Difficulty: ${adaptiveDifficulty}`);
+    }
+
+    // Bulk update all questions
+    if (analyticsUpdates.length > 0) {
+      await Question.bulkWrite(analyticsUpdates);
+      console.log(`   ✅ Updated analytics for ${analyticsUpdates.length} questions`);
+    }
 
     const percentage = totalQuestions > 0 ? (correctAnswers / totalQuestions) * 100 : 0;
 
@@ -2367,6 +2441,41 @@ export const toggleAnswerRelease = async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Error toggling answer release:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+/**
+ * Get questions by IDs (for preview)
+ */
+export const getQuestionsByIds = async (req, res) => {
+  try {
+    const { user } = req;
+    if (!user || !['teacher', 'admin'].includes(user.role)) {
+      return res.status(403).json({ success: false, error: 'Unauthorized' });
+    }
+
+    const { questionIds } = req.body;
+    
+    if (!questionIds || !Array.isArray(questionIds)) {
+      return res.status(400).json({ success: false, error: 'questionIds array is required' });
+    }
+
+    console.log(`📚 Fetching ${questionIds.length} questions for preview`);
+
+    const questions = await Question.find({
+      _id: { $in: questionIds.map(id => mongoose.Types.ObjectId.isValid(id) ? id : null).filter(Boolean) },
+      deleted_at: null
+    }).lean();
+
+    console.log(`✅ Found ${questions.length} questions`);
+
+    res.status(200).json({
+      success: true,
+      questions
+    });
+  } catch (error) {
+    console.error('❌ Error fetching questions by IDs:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 };

@@ -73,11 +73,11 @@ const examSchema = new mongoose.Schema({
   },
   shuffle_questions: {
     type: Boolean,
-    default: false
+    default: true
   },
   shuffle_options: {
     type: Boolean,
-    default: false
+    default: true
   },
   score_released: {
     type: Boolean,

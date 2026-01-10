@@ -245,3 +245,61 @@ export const updateQuestion = async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 };
+
+/**
+ * Get question analytics (usage stats, success rate, adaptive difficulty)
+ * Teacher/Admin only
+ */
+export const getQuestionAnalytics = async (req, res) => {
+  try {
+    const { user } = req;
+    if (!user || !['teacher', 'admin'].includes(user.role)) {
+      return res.status(403).json({ success: false, error: 'Unauthorized: Only teachers can view analytics' });
+    }
+
+    const { questionBankId } = req.params;
+
+    // Build query filter
+    let filter = { deleted_at: null };
+    if (questionBankId && mongoose.Types.ObjectId.isValid(questionBankId)) {
+      filter.question_bank_id = questionBankId;
+    } else if (user.role === 'teacher') {
+      // Teachers see only their questions
+      filter.created_by = user.id;
+    }
+
+    // Get questions with analytics
+    const questions = await Question.find(filter)
+      .select('latex_code katex_code subject topic level times_used times_correct times_incorrect success_rate adaptive_difficulty question_bank_id')
+      .populate('question_bank_id', 'name')
+      .sort({ times_used: -1 }) // Most used first
+      .lean();
+
+    // Calculate summary statistics
+    const totalQuestions = questions.length;
+    const questionsWithData = questions.filter(q => q.times_used > 0);
+    const averageSuccessRate = questionsWithData.length > 0
+      ? questionsWithData.reduce((sum, q) => sum + (q.success_rate || 0), 0) / questionsWithData.length
+      : 0;
+
+    const difficultyDistribution = {
+      easy: questions.filter(q => q.adaptive_difficulty === 'easy').length,
+      medium: questions.filter(q => q.adaptive_difficulty === 'medium').length,
+      hard: questions.filter(q => q.adaptive_difficulty === 'hard').length
+    };
+
+    res.status(200).json({
+      success: true,
+      summary: {
+        totalQuestions,
+        questionsUsed: questionsWithData.length,
+        averageSuccessRate: Math.round(averageSuccessRate * 100) / 100,
+        difficultyDistribution
+      },
+      questions
+    });
+  } catch (error) {
+    console.error('❌ Error fetching question analytics:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};

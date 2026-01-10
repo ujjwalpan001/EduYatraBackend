@@ -20,6 +20,12 @@ const questionSchema = new mongoose.Schema({
   katex_solution: { type: String },
   subject: { type: String, maxlength: 100, required: true },
   question_stats: { type: mongoose.Schema.Types.Mixed, default: {} },
+  // Analytics fields for adaptive difficulty
+  times_used: { type: Number, default: 0, comment: 'Number of times this question was presented to students' },
+  times_correct: { type: Number, default: 0, comment: 'Number of times students answered correctly' },
+  times_incorrect: { type: Number, default: 0, comment: 'Number of times students answered incorrectly' },
+  success_rate: { type: Number, default: 0, comment: 'Percentage of correct answers (0-100)' },
+  adaptive_difficulty: { type: String, enum: ['easy', 'medium', 'hard'], default: 'medium', comment: 'Auto-calculated difficulty based on student performance' },
   course_id: { type: mongoose.Schema.Types.ObjectId, ref: "Course", required: true },
   institute_id: { type: mongoose.Schema.Types.ObjectId, ref: "Institute", required: true },
   created_by: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },

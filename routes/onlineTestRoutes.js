@@ -24,7 +24,8 @@ import {
   endTest,
   deleteExam,
   toggleScoreRelease,
-  toggleAnswerRelease
+  toggleAnswerRelease,
+  getQuestionsByIds
 } from '../controllers/onlineTestController.js';
 import { authenticateToken } from '../middleware/auth.js';
 import Class from '../models/Class.js';
@@ -152,6 +153,9 @@ router.delete('/:examId', authenticateToken, deleteExam);
 // Score and answer release control routes (teacher only)
 router.post('/:examId/toggle-score-release', authenticateToken, toggleScoreRelease);
 router.post('/:examId/toggle-answer-release', authenticateToken, toggleAnswerRelease);
+
+// Get questions by IDs for preview
+router.post('/questions-by-ids', authenticateToken, getQuestionsByIds);
 
 router.get('/:id/questions', authenticateToken, getExamQuestions); // Add missing route
 
