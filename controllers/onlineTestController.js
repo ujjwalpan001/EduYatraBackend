@@ -1298,7 +1298,7 @@ export const getAttendedTests = async (req, res) => {
 };
 
 /**
- * Get test answers for a submitted test (for student review)
+ * Get test answers for a submitted test (for student review and teacher access)
  */
 export const getTestAnswers = async (req, res) => {
   try {
@@ -1309,7 +1309,7 @@ export const getTestAnswers = async (req, res) => {
     console.log('   User:', user?.email, 'Role:', user?.role);
     console.log('   Submission ID:', submissionId);
     
-    if (!user || user.role !== 'student') {
+    if (!user || !['student', 'teacher', 'admin'].includes(user.role)) {
       console.log('❌ Unauthorized access attempt');
       return res.status(403).json({ success: false, error: 'Unauthorized' });
     }
@@ -1319,19 +1319,38 @@ export const getTestAnswers = async (req, res) => {
     }
 
     // Find the test submission
-    const submission = await TestSubmission.findOne({
-      _id: submissionId,
-      student_email: user.email
-    }).lean();
+    let submissionQuery = { _id: submissionId };
+    
+    // If student, only allow access to their own submissions
+    if (user.role === 'student') {
+      submissionQuery.student_email = user.email;
+    }
+    
+    const submission = await TestSubmission.findOne(submissionQuery).lean();
 
     if (!submission) {
       console.log('❌ Submission not found or unauthorized');
       return res.status(404).json({ success: false, error: 'Submission not found or unauthorized' });
     }
 
-    console.log(`   Found submission for exam: ${submission.exam_id}`);
+    // For teachers, verify they have access to this student's class
+    if (user.role === 'teacher') {
+      const exam = await Exam.findById(submission.exam_id).select('class_id').lean();
+      if (!exam) {
+        return res.status(404).json({ success: false, error: 'Exam not found' });
+      }
 
-    // Get exam details
+      const classDoc = await Class.findById(exam.class_id).select('teacher_id').lean();
+      if (!classDoc || classDoc.teacher_id.toString() !== user.id.toString()) {
+        console.log('❌ Teacher does not have access to this student\'s class');
+        return res.status(403).json({ success: false, error: 'You do not have access to this submission' });
+      }
+    }
+
+    console.log(`   Found submission for exam: ${submission.exam_id}`);
+    console.log(`   ✅ Access granted for ${user.role}`);
+
+    // Get exam details (fetch again with full details if needed for students)
     const exam = await Exam.findById(submission.exam_id)
       .select('title description')
       .lean();
@@ -1350,26 +1369,51 @@ export const getTestAnswers = async (req, res) => {
     // Get all questions from the question set
     const questionSetQuestions = await QuestionSetQuestion.find({
       questionset_id: questionSet._id
-    }).lean();
+    }).sort({ question_order: 1 }).lean();
 
     console.log(`   Found ${questionSetQuestions.length} questions in the set`);
 
     const questionIds = questionSetQuestions.map(qsq => qsq.question_id);
+    
+    // Check for duplicates
+    const uniqueQuestionIds = [...new Set(questionIds.map(id => id.toString()))];
+    if (uniqueQuestionIds.length !== questionIds.length) {
+      console.warn(`⚠️ Warning: Found ${questionIds.length - uniqueQuestionIds.length} duplicate question IDs in question set`);
+    }
 
-    // Get all question details
+    // Get all question details using unique IDs only
     const questions = await Question.find({
-      _id: { $in: questionIds },
+      _id: { $in: uniqueQuestionIds },
       deleted_at: null
     }).select('latex_code correct_option_latex incorrect_option_latex subject difficulty_rating').lean();
 
     console.log(`   Retrieved ${questions.length} question details`);
+    
+    // Create a map for quick lookup
+    const questionMap = new Map(questions.map(q => [q._id.toString(), q]));
 
-    // Format the questions with answers
-    const formattedQuestions = questions.map(q => {
-      const questionId = q._id.toString();
-      // When using .lean(), Map becomes a plain object, so use bracket notation
-      const answerData = submission.answers ? submission.answers[questionId] : null;
-      const correctAnswer = q.correct_option_latex;
+    // Format the questions in the original order from questionSetQuestions, skipping duplicates
+    const seenQuestionIds = new Set();
+    const formattedQuestions = questionSetQuestions
+      .map(qsq => {
+        const questionId = qsq.question_id.toString();
+        
+        // Skip if we've already processed this question
+        if (seenQuestionIds.has(questionId)) {
+          console.warn(`⚠️ Skipping duplicate question ID: ${questionId}`);
+          return null;
+        }
+        seenQuestionIds.add(questionId);
+        
+        const q = questionMap.get(questionId);
+        if (!q) {
+          console.warn(`⚠️ Question not found in map: ${questionId}`);
+          return null;
+        }
+        
+        // When using .lean(), Map becomes a plain object, so use bracket notation
+        const answerData = submission.answers ? submission.answers[questionId] : null;
+        const correctAnswer = q.correct_option_latex;
       
       // Handle both old format (string) and new format (object)
       let studentAnswerText = null;
@@ -1441,7 +1485,8 @@ export const getTestAnswers = async (req, res) => {
         subject: q.subject || 'General',
         difficulty_rating: q.difficulty_rating || 1
       };
-    });
+    })
+    .filter(q => q !== null); // Remove null entries from duplicates
 
     console.log(`✅ Returning ${formattedQuestions.length} questions with answers`);
     if (formattedQuestions.length > 0) {
@@ -1895,6 +1940,7 @@ export const getStudentDetailedAnalysis = async (req, res) => {
 
     // Recent test results
     const recentTests = submissions.slice(0, 10).map(sub => ({
+      submission_id: sub._id,
       exam_id: sub.exam_id?._id,
       exam_name: sub.exam_id?.title || sub.exam_id?.exam_name || 'Untitled Exam',
       subject: sub.exam_id?.question_bank_id?.subject || 'Unknown',
