@@ -2,18 +2,6 @@ import bcrypt from "bcryptjs";
 import mongoose from "mongoose";
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
-import AdminCode from "../models/AdminCode.js";
-import AuditLog from "../models/AuditLog.js";
-
-// Helper to get client IP (same as in adminController)
-const getClientIp = (req) => {
-  return req.headers['x-forwarded-for']?.split(',')[0] ||
-         req.headers['x-real-ip'] ||
-         req.connection?.remoteAddress ||
-         req.socket?.remoteAddress ||
-         req.ip ||
-         'Unknown';
-};
 
 export const signup = async (req, res) => {
   try {
@@ -28,7 +16,6 @@ export const signup = async (req, res) => {
       school,
       adminCode,
       institution,
-      institute,
     } = req.body;
 
     if (!fullName || !email || !password || !confirmPassword || !role) {
@@ -43,42 +30,12 @@ export const signup = async (req, res) => {
       return res.status(400).json({ success: false, error: "Grade is required for students" });
     }
 
-    if (role === "teacher" && !subject) {
-      return res.status(400).json({ success: false, error: "Subject is required for teachers" });
+    if (role === "teacher" && (!subject || !school)) {
+      return res.status(400).json({ success: false, error: "Subject and school are required for teachers" });
     }
 
-    if (role === "admin" && !adminCode) {
-      return res.status(400).json({ success: false, error: "Admin code is required for admins" });
-    }
-
-    // Verify admin code for super admin access
-    if (role === "admin") {
-      // Check if it's the super admin code OR a valid code from database
-      if (adminCode === "9804") {
-        // Super admin code - always valid
-      } else {
-        // Check database for valid admin code
-        const validCode = await AdminCode.findOne({ 
-          code: adminCode,
-          is_active: true,
-          used_by: null // Code hasn't been used yet
-        });
-
-        if (!validCode) {
-          return res.status(403).json({ 
-            success: false, 
-            error: "Invalid or expired admin code. Please contact the system administrator." 
-          });
-        }
-
-        // Check if code has expired
-        if (validCode.expires_at && new Date(validCode.expires_at) < new Date()) {
-          return res.status(403).json({ 
-            success: false, 
-            error: "This admin code has expired. Please contact the system administrator." 
-          });
-        }
-      }
+    if (role === "admin" && (!adminCode || !institution)) {
+      return res.status(400).json({ success: false, error: "Admin code and institution are required for admins" });
     }
 
     const existingUser = await User.findOne({ email });
@@ -95,68 +52,30 @@ export const signup = async (req, res) => {
       email,
       password: hashedPassword,
       role,
-      institute: institute || '',
       ...(role === "student" ? { grade } : {}),
-      ...(role === "teacher" ? { subject } : {}),
+      ...(role === "teacher" ? { subject, school } : {}),
       ...(role === "admin" ? { adminCode, institution } : {}),
     };
 
     const newUser = new User(userData);
     await newUser.save();
 
-    // If admin used a code from database (not super admin code), mark it as used and deactivate
-    if (role === "admin" && adminCode !== "9804") {
-      await AdminCode.findOneAndUpdate(
-        { code: adminCode },
-        { 
-          used_by: newUser._id,
-          used_at: new Date(),
-          is_active: false // Automatically deactivate after use
-        }
-      );
-    }
-
     const secret = process.env.JWT_SECRET;
     if (!secret) {
       return res.status(500).json({ success: false, error: "JWT_SECRET is not configured on server" });
     }
 
-    const isSuperAdmin = newUser.email === 'admin@gmail.com';
-    
     const token = jwt.sign(
-      { 
-        id: newUser._id, 
-        email: newUser.email, 
-        role: newUser.role, 
-        fullName: newUser.fullName,
-        isSuperAdmin
-      },
+      { id: newUser._id, email: newUser.email, role: newUser.role, fullName: newUser.fullName }, // Include fullName
       secret,
       { expiresIn: "1h" }
     );
-
-    // Audit: user signup
-    try {
-      await AuditLog.create({
-        user_id: newUser._id,
-        changed_by: newUser._id,
-        action: 'signup',
-        entity_type: 'User',
-        entity_id: newUser._id,
-        details: `New ${newUser.role} signed up: ${newUser.email}`,
-        ip_address: getClientIp(req),
-        user_agent: req.headers['user-agent']
-      });
-    } catch (e) {
-      console.warn('Audit log (signup) failed:', e?.message);
-    }
 
     return res.status(201).json({
       success: true,
       message: "User registered successfully",
       token,
       role: newUser.role,
-      isSuperAdmin,
     });
   } catch (error) {
     console.error("Signup error:", error);
@@ -187,17 +106,8 @@ export const login = async (req, res) => {
       return res.status(500).json({ success: false, error: "JWT_SECRET is not configured on server" });
     }
 
-    const isSuperAdmin = user.email === 'admin@gmail.com';
-    
     const token = jwt.sign(
-      { 
-        id: user._id, 
-        email: user.email, 
-        role: user.role, 
-        fullName: user.fullName,
-        isSuperAdmin,
-        permissions: user.permissions || []
-      },
+      { id: user._id, email: user.email, role: user.role, fullName: user.fullName }, // Include fullName
       secret,
       { expiresIn: "1h" }
     );
@@ -205,28 +115,11 @@ export const login = async (req, res) => {
     user.last_login = new Date();
     await user.save();
 
-    // Audit: user login
-    try {
-      await AuditLog.create({
-        user_id: user._id,
-        changed_by: user._id,
-        action: 'login',
-        entity_type: 'User',
-        entity_id: user._id,
-        details: `Login success for ${user.email}`,
-        ip_address: getClientIp(req),
-        user_agent: req.headers['user-agent']
-      });
-    } catch (e) {
-      console.warn('Audit log (login) failed:', e?.message);
-    }
-
     return res.status(200).json({
       success: true,
       message: "Login successful",
       token,
       role: user.role,
-      isSuperAdmin,
     });
   } catch (error) {
     console.error("Login error:", error);

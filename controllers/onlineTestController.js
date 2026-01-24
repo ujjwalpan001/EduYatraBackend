@@ -540,7 +540,7 @@ export const getAllExams = async (req, res) => {
     // Admin sees all exams (no additional filter)
 
     const exams = await Exam.find(query)
-      .populate('teacher_id', 'username fullName email')
+      .populate('teacher_id', 'fullName email')
       .populate('class_id', 'class_name')
       .sort({ created_at: -1 });
     
@@ -1852,12 +1852,12 @@ export const getExamParticipants = async (req, res) => {
 
     // Get all submissions for this exam with student details
     const submissions = await TestSubmission.find({ exam_id: examId })
-      .populate('student_id', 'username fullName email')
+      .populate('student_id', 'fullName email')
       .sort({ submitted_at: -1 });
 
     const participants = submissions.map(sub => ({
       student_id: sub.student_id?._id,
-      student_name: sub.student_id?.username || sub.student_id?.fullName || 'Unknown',
+      student_name: sub.student_id?.fullName || 'Unknown',
       student_email: sub.student_email || sub.student_id?.email || 'N/A',
       score: sub.score,
       percentage: sub.percentage,

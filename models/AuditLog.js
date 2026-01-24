@@ -1,4 +1,4 @@
-import mongoose from 'mongoose';
+const mongoose = require('mongoose');
 
 const auditLogSchema = new mongoose.Schema({
   audit_log_id: {
@@ -7,15 +7,16 @@ const auditLogSchema = new mongoose.Schema({
   },
   table_name: {
     type: String,
-    required: false // Make optional for backward compatibility
+    required: true
   },
   record_id: {
-    type: mongoose.Schema.Types.Mixed, // Support both Number and String/ObjectId
-    required: false // Make optional for backward compatibility
+    type: Number, // Can also be ObjectId if your record IDs are ObjectId
+    required: true
   },
   action: {
     type: String,
-    required: true
+    required: true,
+    enum: ['CREATE', 'UPDATE', 'DELETE', 'READ'] // Optional: limit actions
   },
   old_values: {
     type: mongoose.Schema.Types.Mixed // JSON object
@@ -27,20 +28,6 @@ const auditLogSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   },
-  // Additional fields for backward compatibility
-  user_id: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
-  },
-  entity_type: {
-    type: String
-  },
-  entity_id: {
-    type: mongoose.Schema.Types.Mixed
-  },
-  details: {
-    type: String
-  },
   ip_address: {
     type: String
   },
@@ -51,9 +38,6 @@ const auditLogSchema = new mongoose.Schema({
     type: Date,
     default: Date.now
   }
-}, { 
-  collection: 'audit_log',
-  timestamps: true // Automatically adds createdAt and updatedAt
-});
+}, { collection: 'audit_log' });
 
-export default mongoose.models.AuditLog || mongoose.model('AuditLog', auditLogSchema);
+module.exports = mongoose.model('AuditLog', auditLogSchema);

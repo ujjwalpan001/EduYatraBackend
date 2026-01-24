@@ -14,11 +14,6 @@ const userSchema = new mongoose.Schema({
     maxlength: 100,
     trim: true,
   },
-  fullName: {
-    type: String,
-    maxlength: 200,
-    trim: true,
-  },
   email: {
     type: String,
     required: true,
@@ -71,22 +66,8 @@ const userSchema = new mongoose.Schema({
   subject: String,       // for teachers
   school: String,        // for teachers
   adminCode: String,     // for admins
-  institution: String,   // for admins
-  institute: String,     // institute name for all users
-  permissions: {         // for admins - control access to modules
-    type: [String],
-    default: ['dashboard', 'students', 'teachers', 'classes', 'exams', 'question-banks', 'content', 'support', 'analytics', 'subscriptions', 'settings', 'audit-logs']
-  }
+  institution: String    // for admins
 });
-
-// Virtual 'name' for consistent consumer API
-userSchema.virtual('name').get(function () {
-  return this.username || this.fullName || '';
-});
-
-// Include virtuals in JSON/Object outputs (non-lean)
-userSchema.set('toJSON', { virtuals: true });
-userSchema.set('toObject', { virtuals: true });
 
 // Automatically update the updated_at field before saving
 userSchema.pre('save', function (next) {

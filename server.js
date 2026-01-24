@@ -7,7 +7,6 @@ import onlineTestRoutes from './routes/onlineTestRoutes.js';
 import questionBankRoutes from './routes/questionBankRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import classRoutes from './routes/classRoutes.js';
-import adminRoutes from './routes/adminRoutes.js';
 import { authenticateToken } from './middleware/auth.js';
 import Question from './models/Question.js';
 import User from './models/User.js';
@@ -32,8 +31,6 @@ const allowedOrigins = [
   'https://www.deskoros.tech',
   'http://192.168.29.184:8080', // Added for frontend
   'http://localhost:8080',
-  'http://localhost:5173', // Vite default port
-  'http://localhost:3000', // React default port
   'https://edu-yatra.vercel.app', // Added for production
   // Optional: for local testing variations
 ];
@@ -49,7 +46,7 @@ app.use(cors({
       callback(new Error('Not allowed by CORS'));
     }
   },
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true, // Support Authorization headers for JWT
 }));
@@ -66,7 +63,6 @@ app.use('/api/exams', authenticateToken, onlineTestRoutes);
 app.use('/api/question-banks', authenticateToken, questionBankRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/classes', authenticateToken, classRoutes);
-app.use('/api/admin', authenticateToken, adminRoutes);
 
 // Global error handler
 app.use((err, req, res, next) => {
