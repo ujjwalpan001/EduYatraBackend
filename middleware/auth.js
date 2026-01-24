@@ -20,3 +20,14 @@ export const authenticateToken = (req, res, next) => {
     return res.status(403).json({ success: false, error: 'Invalid or expired token' });
   }
 };
+
+// Middleware to check if user is super admin (admin@gmail.com)
+export const isSuperAdmin = (req, res, next) => {
+  if (req.user.email !== 'admin@gmail.com' || !req.user.isSuperAdmin) {
+    return res.status(403).json({ 
+      success: false, 
+      error: 'Access denied. Super admin privileges required.' 
+    });
+  }
+  next();
+};

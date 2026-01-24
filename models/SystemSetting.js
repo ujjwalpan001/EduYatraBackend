@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const systemSettingSchema = new mongoose.Schema({
   setting_id: {
@@ -32,4 +32,4 @@ const systemSettingSchema = new mongoose.Schema({
   }
 }, { collection: 'system_settings' });
 
-module.exports = mongoose.model('SystemSetting', systemSettingSchema);
+export default mongoose.models.SystemSetting || mongoose.model('SystemSetting', systemSettingSchema);

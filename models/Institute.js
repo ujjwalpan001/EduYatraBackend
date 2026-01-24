@@ -23,4 +23,9 @@ const instituteSchema = new mongoose.Schema({
   }
 });
 
+// Virtual for is_deleted
+instituteSchema.virtual('is_deleted').get(function() {
+  return !!this.deleted_at;
+});
+
 export default mongoose.models.Institute || mongoose.model('Institute', instituteSchema);
