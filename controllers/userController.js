@@ -2,6 +2,8 @@ import bcrypt from "bcryptjs";
 import mongoose from "mongoose";
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
+import Institute from "../models/Institute.js";
+import AdminCode from "../models/AdminCode.js";
 
 export const signup = async (req, res) => {
   try {
@@ -15,7 +17,7 @@ export const signup = async (req, res) => {
       subject,
       school,
       adminCode,
-      institution,
+      institute,
     } = req.body;
 
     if (!fullName || !email || !password || !confirmPassword || !role) {
@@ -34,13 +36,34 @@ export const signup = async (req, res) => {
       return res.status(400).json({ success: false, error: "Subject and school are required for teachers" });
     }
 
-    if (role === "admin" && (!adminCode || !institution)) {
-      return res.status(400).json({ success: false, error: "Admin code and institution are required for admins" });
+    if (role === "admin" && (!adminCode || !institute)) {
+      return res.status(400).json({ success: false, error: "Admin code and institute are required for admins" });
     }
 
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ success: false, error: "Email already registered" });
+    }
+
+    // Check if admin code exists and determine if it creates a super admin
+    let isSuperAdmin = false;
+    if (role === "admin") {
+      const adminCodeDoc = await AdminCode.findOne({ code: adminCode, isActive: true });
+      if (!adminCodeDoc) {
+        return res.status(400).json({ success: false, error: "Invalid or inactive admin code" });
+      }
+      
+      // Check if code has expired
+      if (adminCodeDoc.expiresAt && new Date() > adminCodeDoc.expiresAt) {
+        return res.status(400).json({ success: false, error: "This admin code has expired" });
+      }
+      
+      // Check if max uses reached
+      if (adminCodeDoc.maxUses && adminCodeDoc.usedBy.length >= adminCodeDoc.maxUses) {
+        return res.status(400).json({ success: false, error: "This admin code has reached its maximum uses" });
+      }
+      
+      isSuperAdmin = adminCodeDoc.isSuperAdminCode;
     }
 
     const salt = await bcrypt.genSalt(10);
@@ -51,14 +74,24 @@ export const signup = async (req, res) => {
       fullName,
       email,
       password: hashedPassword,
-      role,
+      role: isSuperAdmin ? "superadmin" : role,
+      isSuperAdmin: isSuperAdmin,
+      permissions: isSuperAdmin ? [] : [], // Super admins get full access, regular admins get none by default
       ...(role === "student" ? { grade } : {}),
       ...(role === "teacher" ? { subject, school } : {}),
-      ...(role === "admin" ? { adminCode, institution } : {}),
+      ...(role === "admin" ? { adminCode, institute } : {}),
     };
 
     const newUser = new User(userData);
     await newUser.save();
+    
+    // Add user to admin code's usedBy array
+    if (role === "admin") {
+      await AdminCode.findOneAndUpdate(
+        { code: adminCode },
+        { $push: { usedBy: newUser._id } }
+      );
+    }
 
     const secret = process.env.JWT_SECRET;
     if (!secret) {
@@ -66,7 +99,14 @@ export const signup = async (req, res) => {
     }
 
     const token = jwt.sign(
-      { id: newUser._id, email: newUser.email, role: newUser.role, fullName: newUser.fullName }, // Include fullName
+      { 
+        id: newUser._id, 
+        email: newUser.email, 
+        role: newUser.role, 
+        fullName: newUser.fullName, 
+        isSuperAdmin: newUser.isSuperAdmin || false,
+        permissions: newUser.permissions || []
+      },
       secret,
       { expiresIn: "1h" }
     );
@@ -76,6 +116,8 @@ export const signup = async (req, res) => {
       message: "User registered successfully",
       token,
       role: newUser.role,
+      isSuperAdmin: newUser.isSuperAdmin || false,
+      permissions: newUser.permissions || []
     });
   } catch (error) {
     console.error("Signup error:", error);
@@ -107,7 +149,14 @@ export const login = async (req, res) => {
     }
 
     const token = jwt.sign(
-      { id: user._id, email: user.email, role: user.role, fullName: user.fullName }, // Include fullName
+      { 
+        id: user._id, 
+        email: user.email, 
+        role: user.role, 
+        fullName: user.fullName, 
+        isSuperAdmin: user.isSuperAdmin || false,
+        permissions: user.permissions || []
+      },
       secret,
       { expiresIn: "1h" }
     );
@@ -120,6 +169,8 @@ export const login = async (req, res) => {
       message: "Login successful",
       token,
       role: user.role,
+      isSuperAdmin: user.isSuperAdmin || false,
+      permissions: user.permissions || []
     });
   } catch (error) {
     console.error("Login error:", error);
@@ -177,5 +228,19 @@ export const updateProfile = async (req, res) => {
   } catch (error) {
     console.error("Profile update error:", error);
     return res.status(500).json({ success: false, error: "Server error during profile update" });
+  }
+};
+
+export const getInstitutes = async (req, res) => {
+  try {
+    const institutes = await Institute.find().select('name location');
+    
+    return res.status(200).json({
+      success: true,
+      institutes: institutes || []
+    });
+  } catch (error) {
+    console.error("Get institutes error:", error);
+    return res.status(500).json({ success: false, error: "Server error fetching institutes" });
   }
 };

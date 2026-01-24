@@ -20,3 +20,23 @@ export const authenticateToken = (req, res, next) => {
     return res.status(403).json({ success: false, error: 'Invalid or expired token' });
   }
 };
+
+export const authenticateAdmin = (req, res, next) => {
+  authenticateToken(req, res, () => {
+    if (req.user && (req.user.role === 'admin' || req.user.role === 'superadmin' || req.user.isSuperAdmin)) {
+      next();
+    } else {
+      return res.status(403).json({ success: false, error: 'Admin access required' });
+    }
+  });
+};
+
+export const authenticateSuperAdmin = (req, res, next) => {
+  authenticateToken(req, res, () => {
+    if (req.user && (req.user.role === 'superadmin' || req.user.isSuperAdmin === true)) {
+      next();
+    } else {
+      return res.status(403).json({ success: false, error: 'Super admin access required' });
+    }
+  });
+};

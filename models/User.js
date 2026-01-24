@@ -31,7 +31,15 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: true,
     maxlength: 50,
-    enum: ['student', 'teacher', 'admin'],
+    enum: ['student', 'teacher', 'admin', 'superadmin'],
+  },
+  isSuperAdmin: {
+    type: Boolean,
+    default: false,
+  },
+  permissions: {
+    type: [String],
+    default: [],
   },
   email_verified: {
     type: Boolean,
@@ -66,7 +74,7 @@ const userSchema = new mongoose.Schema({
   subject: String,       // for teachers
   school: String,        // for teachers
   adminCode: String,     // for admins
-  institution: String    // for admins
+  institute: String      // for admins
 });
 
 // Automatically update the updated_at field before saving
