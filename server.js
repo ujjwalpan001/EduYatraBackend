@@ -8,6 +8,7 @@ import questionBankRoutes from './routes/questionBankRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import classRoutes from './routes/classRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
+import contentRoutes from './routes/contentRoutes.js';
 import { authenticateToken } from './middleware/auth.js';
 import Question from './models/Question.js';
 import User from './models/User.js';
@@ -65,6 +66,7 @@ app.use('/api/question-banks', authenticateToken, questionBankRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/classes', authenticateToken, classRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/admin/content', contentRoutes);
 
 // Global error handler
 app.use((err, req, res, next) => {

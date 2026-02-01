@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const auditLogSchema = new mongoose.Schema({
   audit_log_id: {
@@ -10,7 +10,7 @@ const auditLogSchema = new mongoose.Schema({
     required: true
   },
   record_id: {
-    type: Number, // Can also be ObjectId if your record IDs are ObjectId
+    type: String, // Changed to String to support ObjectId strings
     required: true
   },
   action: {
@@ -40,4 +40,5 @@ const auditLogSchema = new mongoose.Schema({
   }
 }, { collection: 'audit_log' });
 
-module.exports = mongoose.model('AuditLog', auditLogSchema);
+const AuditLog = mongoose.model('AuditLog', auditLogSchema);
+export default AuditLog;
