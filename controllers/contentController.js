@@ -2,6 +2,8 @@
 import Slider from '../models/Slider.js';
 import Poster from '../models/Poster.js';
 import Advertisement from '../models/Advertisement.js';
+import SuccessStory from '../models/SuccessStory.js';
+import Video from '../models/Video.js';
 import AuditLog from '../models/AuditLog.js';
 
 // ==================== SLIDERS ====================
@@ -51,11 +53,11 @@ export const createSlider = async (req, res) => {
 
     // Audit log
     await AuditLog.create({
-      user: req.user.id,
+      table_name: 'sliders',
+      record_id: slider._id.toString(),
       action: 'CREATE',
-      resource_type: 'Slider',
-      resource_id: slider._id,
-      details: { title: slider.title }
+      changed_by: req.user.id,
+      new_values: { title: slider.title }
     });
 
     res.status(201).json({ slider, message: 'Slider created successfully' });
@@ -85,11 +87,11 @@ export const updateSlider = async (req, res) => {
 
     // Audit log
     await AuditLog.create({
-      user: req.user.id,
+      table_name: 'sliders',
+      record_id: slider._id.toString(),
       action: 'UPDATE',
-      resource_type: 'Slider',
-      resource_id: slider._id,
-      details: { updates }
+      changed_by: req.user.id,
+      new_values: updates
     });
 
     res.json({ slider, message: 'Slider updated successfully' });
@@ -111,11 +113,11 @@ export const deleteSlider = async (req, res) => {
 
     // Audit log
     await AuditLog.create({
-      user: req.user.id,
+      table_name: 'sliders',
+      record_id: sliderId,
       action: 'DELETE',
-      resource_type: 'Slider',
-      resource_id: sliderId,
-      details: { title: slider.title }
+      changed_by: req.user.id,
+      old_values: { title: slider.title }
     });
 
     res.json({ message: 'Slider deleted successfully' });
@@ -174,11 +176,11 @@ export const createPoster = async (req, res) => {
 
     // Audit log
     await AuditLog.create({
-      user: req.user.id,
+      table_name: 'posters',
+      record_id: poster._id.toString(),
       action: 'CREATE',
-      resource_type: 'Poster',
-      resource_id: poster._id,
-      details: { title: poster.title, type: poster.poster_type }
+      changed_by: req.user.id,
+      new_values: { title: poster.title, type: poster.poster_type }
     });
 
     res.status(201).json({ poster, message: 'Poster created successfully' });
@@ -208,11 +210,11 @@ export const updatePoster = async (req, res) => {
 
     // Audit log
     await AuditLog.create({
-      user: req.user.id,
+      table_name: 'posters',
+      record_id: poster._id.toString(),
       action: 'UPDATE',
-      resource_type: 'Poster',
-      resource_id: poster._id,
-      details: { updates }
+      changed_by: req.user.id,
+      new_values: updates
     });
 
     res.json({ poster, message: 'Poster updated successfully' });
@@ -234,11 +236,11 @@ export const deletePoster = async (req, res) => {
 
     // Audit log
     await AuditLog.create({
-      user: req.user.id,
+      table_name: 'posters',
+      record_id: posterId,
       action: 'DELETE',
-      resource_type: 'Poster',
-      resource_id: posterId,
-      details: { title: poster.title }
+      changed_by: req.user.id,
+      old_values: { title: poster.title }
     });
 
     res.json({ message: 'Poster deleted successfully' });
@@ -296,11 +298,11 @@ export const createAd = async (req, res) => {
 
     // Audit log
     await AuditLog.create({
-      user: req.user.id,
+      table_name: 'advertisements',
+      record_id: ad._id.toString(),
       action: 'CREATE',
-      resource_type: 'Advertisement',
-      resource_id: ad._id,
-      details: { title: ad.title, type: ad.ad_type }
+      changed_by: req.user.id,
+      new_values: { title: ad.title, type: ad.ad_type }
     });
 
     res.status(201).json({ ad, message: 'Advertisement created successfully' });
@@ -330,11 +332,11 @@ export const updateAd = async (req, res) => {
 
     // Audit log
     await AuditLog.create({
-      user: req.user.id,
+      table_name: 'advertisements',
+      record_id: ad._id.toString(),
       action: 'UPDATE',
-      resource_type: 'Advertisement',
-      resource_id: ad._id,
-      details: { updates }
+      changed_by: req.user.id,
+      new_values: updates
     });
 
     res.json({ ad, message: 'Advertisement updated successfully' });
@@ -356,11 +358,11 @@ export const deleteAd = async (req, res) => {
 
     // Audit log
     await AuditLog.create({
-      user: req.user.id,
+      table_name: 'advertisements',
+      record_id: adId,
       action: 'DELETE',
-      resource_type: 'Advertisement',
-      resource_id: adId,
-      details: { title: ad.title }
+      changed_by: req.user.id,
+      old_values: { title: ad.title }
     });
 
     res.json({ message: 'Advertisement deleted successfully' });
@@ -370,20 +372,267 @@ export const deleteAd = async (req, res) => {
   }
 };
 
+// ==================== SUCCESS STORIES ====================
+export const listSuccessStories = async (req, res) => {
+  try {
+    const { page = 1, limit = 50, is_active, category } = req.query;
+    const skip = (page - 1) * limit;
+
+    const filter = {};
+    if (is_active !== undefined) filter.is_active = is_active === 'true';
+    if (category) filter.category = category;
+
+    const stories = await SuccessStory.find(filter)
+      .sort({ display_order: 1, created_at: -1 })
+      .skip(skip)
+      .limit(parseInt(limit))
+      .populate('created_by', 'username email')
+      .populate('updated_by', 'username email');
+
+    const total = await SuccessStory.countDocuments(filter);
+
+    res.json({
+      stories,
+      pagination: {
+        total,
+        page: parseInt(page),
+        pages: Math.ceil(total / limit),
+        limit: parseInt(limit)
+      }
+    });
+  } catch (error) {
+    console.error('Error listing success stories:', error);
+    res.status(500).json({ error: 'Failed to fetch success stories' });
+  }
+};
+
+export const createSuccessStory = async (req, res) => {
+  try {
+    const storyData = {
+      ...req.body,
+      created_by: req.user.id,
+      updated_by: req.user.id
+    };
+
+    const story = new SuccessStory(storyData);
+    await story.save();
+
+    // Audit log
+    await AuditLog.create({
+      table_name: 'success_stories',
+      record_id: story._id.toString(),
+      action: 'CREATE',
+      changed_by: req.user.id,
+      new_values: { title: story.title, category: story.category }
+    });
+
+    res.status(201).json({ story, message: 'Success story created successfully' });
+  } catch (error) {
+    console.error('Error creating success story:', error);
+    res.status(500).json({ error: 'Failed to create success story' });
+  }
+};
+
+export const updateSuccessStory = async (req, res) => {
+  try {
+    const { storyId } = req.params;
+    const updates = {
+      ...req.body,
+      updated_by: req.user.id
+    };
+
+    const story = await SuccessStory.findByIdAndUpdate(
+      storyId,
+      updates,
+      { new: true, runValidators: true }
+    );
+
+    if (!story) {
+      return res.status(404).json({ error: 'Success story not found' });
+    }
+
+    // Audit log
+    await AuditLog.create({
+      table_name: 'success_stories',
+      record_id: story._id.toString(),
+      action: 'UPDATE',
+      changed_by: req.user.id,
+      new_values: updates
+    });
+
+    res.json({ story, message: 'Success story updated successfully' });
+  } catch (error) {
+    console.error('Error updating success story:', error);
+    res.status(500).json({ error: 'Failed to update success story' });
+  }
+};
+
+export const deleteSuccessStory = async (req, res) => {
+  try {
+    const { storyId } = req.params;
+
+    const story = await SuccessStory.findByIdAndDelete(storyId);
+
+    if (!story) {
+      return res.status(404).json({ error: 'Success story not found' });
+    }
+
+    // Audit log
+    await AuditLog.create({
+      table_name: 'success_stories',
+      record_id: storyId,
+      action: 'DELETE',
+      changed_by: req.user.id,
+      old_values: { title: story.title }
+    });
+
+    res.json({ message: 'Success story deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting success story:', error);
+    res.status(500).json({ error: 'Failed to delete success story' });
+  }
+};
+
+// ==================== VIDEOS ====================
+export const listVideos = async (req, res) => {
+  try {
+    const { page = 1, limit = 50, is_active } = req.query;
+    const skip = (page - 1) * limit;
+
+    const filter = {};
+    if (is_active !== undefined) filter.is_active = is_active === 'true';
+
+    const videos = await Video.find(filter)
+      .sort({ created_at: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const total = await Video.countDocuments(filter);
+
+    res.json({
+      videos,
+      pagination: {
+        total,
+        page: parseInt(page),
+        pages: Math.ceil(total / limit)
+      }
+    });
+  } catch (error) {
+    console.error('Error listing videos:', error);
+    res.status(500).json({ error: 'Failed to fetch videos' });
+  }
+};
+
+export const createVideo = async (req, res) => {
+  try {
+    const { title, description, video_url, thumbnail_url, is_active } = req.body;
+
+    const video = await Video.create({
+      title,
+      description,
+      video_url,
+      thumbnail_url,
+      is_active: is_active !== undefined ? is_active : true
+    });
+
+    // Audit log
+    await AuditLog.create({
+      table_name: 'videos',
+      record_id: video._id,
+      action: 'CREATE',
+      changed_by: req.user.id,
+      new_values: { title, video_url }
+    });
+
+    res.status(201).json({ video, message: 'Video created successfully' });
+  } catch (error) {
+    console.error('Error creating video:', error);
+    res.status(500).json({ error: 'Failed to create video' });
+  }
+};
+
+export const updateVideo = async (req, res) => {
+  try {
+    const { videoId } = req.params;
+    const { title, description, video_url, thumbnail_url, is_active } = req.body;
+
+    const video = await Video.findById(videoId);
+    if (!video) {
+      return res.status(404).json({ error: 'Video not found' });
+    }
+
+    const oldValues = { title: video.title, video_url: video.video_url };
+
+    video.title = title || video.title;
+    video.description = description || video.description;
+    video.video_url = video_url || video.video_url;
+    video.thumbnail_url = thumbnail_url !== undefined ? thumbnail_url : video.thumbnail_url;
+    video.is_active = is_active !== undefined ? is_active : video.is_active;
+
+    await video.save();
+
+    // Audit log
+    await AuditLog.create({
+      table_name: 'videos',
+      record_id: videoId,
+      action: 'UPDATE',
+      changed_by: req.user.id,
+      old_values: oldValues,
+      new_values: { title, video_url }
+    });
+
+    res.json({ video, message: 'Video updated successfully' });
+  } catch (error) {
+    console.error('Error updating video:', error);
+    res.status(500).json({ error: 'Failed to update video' });
+  }
+};
+
+export const deleteVideo = async (req, res) => {
+  try {
+    const { videoId } = req.params;
+
+    const video = await Video.findById(videoId);
+    if (!video) {
+      return res.status(404).json({ error: 'Video not found' });
+    }
+
+    await Video.findByIdAndDelete(videoId);
+
+    // Audit log
+    await AuditLog.create({
+      table_name: 'videos',
+      record_id: videoId,
+      action: 'DELETE',
+      changed_by: req.user.id,
+      old_values: { title: video.title }
+    });
+
+    res.json({ message: 'Video deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting video:', error);
+    res.status(500).json({ error: 'Failed to delete video' });
+  }
+};
+
 // ==================== ANALYTICS ====================
 export const getContentStats = async (req, res) => {
   try {
-    const [slidersCount, postersCount, adsCount] = await Promise.all([
+    const [slidersCount, postersCount, adsCount, storiesCount, videosCount] = await Promise.all([
       Slider.countDocuments({ is_active: true }),
       Poster.countDocuments({ is_active: true }),
-      Advertisement.countDocuments({ is_active: true })
+      Advertisement.countDocuments({ is_active: true }),
+      SuccessStory.countDocuments({ is_active: true }),
+      Video.countDocuments({ is_active: true })
     ]);
 
     res.json({
       stats: {
         active_sliders: slidersCount,
         active_posters: postersCount,
-        active_ads: adsCount
+        active_ads: adsCount,
+        active_stories: storiesCount,
+        active_videos: videosCount
       }
     });
   } catch (error) {

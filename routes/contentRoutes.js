@@ -26,6 +26,18 @@ router.post('/ads', contentController.createAd);
 router.put('/ads/:adId', contentController.updateAd);
 router.delete('/ads/:adId', contentController.deleteAd);
 
+// ==================== SUCCESS STORIES ====================
+router.get('/success-stories', contentController.listSuccessStories);
+router.post('/success-stories', contentController.createSuccessStory);
+router.put('/success-stories/:storyId', contentController.updateSuccessStory);
+router.delete('/success-stories/:storyId', contentController.deleteSuccessStory);
+
+// ==================== VIDEOS ====================
+router.get('/videos', contentController.listVideos);
+router.post('/videos', contentController.createVideo);
+router.put('/videos/:videoId', contentController.updateVideo);
+router.delete('/videos/:videoId', contentController.deleteVideo);
+
 // ==================== STATISTICS ====================
 router.get('/stats', contentController.getContentStats);
 
