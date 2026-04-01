@@ -32,8 +32,8 @@ export const signup = async (req, res) => {
       return res.status(400).json({ success: false, error: "Grade is required for students" });
     }
 
-    if (role === "teacher" && (!subject || !school)) {
-      return res.status(400).json({ success: false, error: "Subject and school are required for teachers" });
+    if (role === "teacher" && (!subject || !institute)) {
+      return res.status(400).json({ success: false, error: "Subject and institute are required for teachers" });
     }
 
     if (role === "admin" && (!adminCode || !institute)) {
@@ -70,7 +70,7 @@ export const signup = async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, salt);
 
     const userData = {
-      username: fullName.split(" ")[0].toLowerCase(),
+      username: fullName.split(" ")[0].toLowerCase() + Date.now().toString(36),
       fullName,
       email,
       password: hashedPassword,
@@ -78,7 +78,7 @@ export const signup = async (req, res) => {
       isSuperAdmin: isSuperAdmin,
       permissions: isSuperAdmin ? [] : [], // Super admins get full access, regular admins get none by default
       ...(role === "student" ? { grade } : {}),
-      ...(role === "teacher" ? { subject, school } : {}),
+      ...(role === "teacher" ? { subject, school: institute } : {}),
       ...(role === "admin" ? { adminCode, institute } : {}),
     };
 
