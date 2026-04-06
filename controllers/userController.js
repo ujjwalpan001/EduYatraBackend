@@ -161,8 +161,7 @@ export const login = async (req, res) => {
       { expiresIn: "1h" }
     );
 
-    user.last_login = new Date();
-    await user.save();
+    await User.updateOne({ _id: user._id }, { $set: { last_login: new Date() } });
 
     return res.status(200).json({
       success: true,
