@@ -32,10 +32,16 @@ connectDB();
 // CORS configuration
 const allowedOrigins = [
   'https://www.deskoros.tech',
-  'http://192.168.29.184:8080', // Added for frontend
+  'https://edu-yatra.vercel.app',
+  // Local development ports (Vite, CRA, etc.)
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://localhost:5174',
   'http://localhost:8080',
-  'https://edu-yatra.vercel.app', // Added for production
-  // Optional: for local testing variations
+  'http://localhost:8081',
+  'http://localhost:8082',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:3000',
 ];
 
 app.use(cors({
@@ -43,9 +49,10 @@ app.use(cors({
     // Allow requests with no origin (like mobile apps or Postman)
     if (!origin) {
       callback(null, true);
-    } else if (allowedOrigins.includes(origin) || origin.startsWith('http://10.1.168.') || origin.startsWith('http://192.168.')) {
+    } else if (allowedOrigins.includes(origin) || origin.startsWith('http://10.') || origin.startsWith('http://192.168.')) {
       callback(null, true);
     } else {
+      console.warn(`🚫 CORS blocked origin: "${origin}"`);
       callback(new Error('Not allowed by CORS'));
     }
   },
