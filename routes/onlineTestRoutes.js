@@ -43,9 +43,32 @@ router.get('/courses', authenticateToken, getCourses); // Add courses route
 router.get('/question-banks', authenticateToken, async (req, res) => {
   console.log('Fetching question banks...', { path: req.path, params: req.params });
   try {
-    const questionBanks = await QuestionBank.find({ deleted_at: null }).select('_id name');
-    console.log('Question banks fetched:', questionBanks);
-    res.status(200).json({ success: true, questionBanks });
+    const userId = req.user.id;
+    // Only return own banks + public/shared banks (never other teachers' private banks)
+    const questionBanks = await QuestionBank.find({
+      deleted_at: null,
+      $or: [
+        { created_by: userId },
+        { visibility: { $in: ['public'] } },
+      ],
+    })
+      .select('_id name visibility created_by')
+      .populate('created_by', 'fullName');
+
+    // Shape response: include creator name for public/shared banks from others
+    const shaped = questionBanks.map((bank) => {
+      const ownerId = bank.created_by?._id?.toString() || bank.created_by?.toString();
+      const isOwner = ownerId === userId;
+      return {
+        _id: bank._id,
+        name: bank.name,
+        visibility: bank.visibility,
+        createdByName: isOwner ? null : (bank.created_by?.fullName || null),
+      };
+    });
+
+    console.log('Question banks fetched:', shaped.length);
+    res.status(200).json({ success: true, questionBanks: shaped });
   } catch (error) {
     console.error("❌ Error fetching question banks:", error);
     res.status(500).json({ success: false, error: error.message });

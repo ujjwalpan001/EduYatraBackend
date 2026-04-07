@@ -13,7 +13,7 @@ const questionBankSchema = new mongoose.Schema({
   },
   visibility: {
     type: String,
-    enum: ['public', 'private', 'shared'],
+    enum: ['public', 'private'],
     default: 'private'
   },
   created_at: {

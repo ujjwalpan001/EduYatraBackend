@@ -29,7 +29,7 @@ const questionSchema = new mongoose.Schema({
   course_id: { type: mongoose.Schema.Types.ObjectId, ref: "Course", required: true },
   institute_id: { type: mongoose.Schema.Types.ObjectId, ref: "Institute", required: true },
   created_by: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-  visibility: { type: String, enum: ['public', 'private'], default: 'public', maxlength: 20 },
+  visibility: { type: String, enum: ['public', 'private'], default: 'private', maxlength: 20 },
   question_bank_id: { type: mongoose.Schema.Types.ObjectId, ref: "QuestionBank", required: true },
   difficulty_rating: { type: Number, default: 0 },
   created_at: { type: Date, default: Date.now },

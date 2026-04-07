@@ -129,7 +129,7 @@ export const createQuestion = async (req, res) => {
       course_id: courseId,
       institute_id: instituteId,
       question_bank_id: questionBankId,
-      visibility: visibility || 'public',
+      visibility: visibility || 'private',
       difficulty_rating,
       updated_at
     });
