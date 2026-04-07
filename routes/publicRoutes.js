@@ -28,10 +28,20 @@ router.get('/posters', async (req, res) => {
   try {
     const posters = await Poster.find({ is_active: true })
       .sort({ display_order: 1, created_at: -1 })
-      .select('title description image_url link_url display_order target_audience')
+      .select('title content image_url link_url display_order target_audience')
       .limit(20);
+
+    const shapedPosters = posters.map((poster) => ({
+      _id: poster._id,
+      title: poster.title,
+      description: poster.content || '',
+      image_url: poster.image_url,
+      link_url: poster.link_url,
+      display_order: poster.display_order,
+      target_audience: poster.target_audience,
+    }));
     
-    res.json({ posters });
+    res.json({ posters: shapedPosters });
   } catch (error) {
     console.error('Error fetching public posters:', error);
     res.status(500).json({ error: 'Failed to fetch posters' });
@@ -45,15 +55,21 @@ router.get('/ads', async (req, res) => {
     
     const ads = await Advertisement.find({
       is_active: true,
-      $or: [
-        { start_date: { $exists: false } },
-        { start_date: null },
-        { start_date: { $lte: now } }
-      ],
-      $or: [
-        { end_date: { $exists: false } },
-        { end_date: null },
-        { end_date: { $gte: now } }
+      $and: [
+        {
+          $or: [
+            { start_date: { $exists: false } },
+            { start_date: null },
+            { start_date: { $lte: now } }
+          ]
+        },
+        {
+          $or: [
+            { end_date: { $exists: false } },
+            { end_date: null },
+            { end_date: { $gte: now } }
+          ]
+        }
       ]
     })
       .sort({ placement: 1, display_order: 1, created_at: -1 })
