@@ -31,7 +31,9 @@ export const createClass = async (req, res) => {
     }
 
     const { class_name, invitation_code, institute_id, course_id, max_students, students } = req.body;
-    if (!class_name || !invitation_code || !institute_id || !course_id) {
+    const normalizedCourse = String(course_id || '').trim();
+
+    if (!class_name || !invitation_code || !institute_id || !normalizedCourse) {
       return res.status(400).json({ success: false, error: 'Missing required fields' });
     }
 
@@ -140,7 +142,7 @@ export const createClass = async (req, res) => {
       class_name,
       invitation_code,
       institute_id,
-      course_id,
+      course_id: normalizedCourse,
       teacher_id: user.id,
       max_students: max_students || null,
       students: processedStudents,

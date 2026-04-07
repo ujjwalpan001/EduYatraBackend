@@ -9,7 +9,6 @@ import userRoutes from './routes/userRoutes.js';
 import classRoutes from './routes/classRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import contentRoutes from './routes/contentRoutes.js';
-import publicRoutes from './routes/publicRoutes.js';
 import { authenticateToken } from './middleware/auth.js';
 import Question from './models/Question.js';
 import User from './models/User.js';
@@ -32,31 +31,27 @@ connectDB();
 // CORS configuration
 const allowedOrigins = [
   'https://www.deskoros.tech',
-  'https://edu-yatra.vercel.app',
-  // Local development ports (Vite, CRA, etc.)
   'http://localhost:3000',
-  'http://localhost:5173',
-  'http://localhost:5174',
   'http://localhost:8080',
-  'http://localhost:8081',
-  'http://localhost:8082',
-  'http://127.0.0.1:5173',
-  'http://127.0.0.1:3000',
+  'https://edu-yatra.vercel.app',
 ];
+
+const localOriginRegex = /^https?:\/\/(localhost|127\.0\.0\.1|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})(:\d+)?$/;
 
 app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (like mobile apps or Postman)
     if (!origin) {
-      callback(null, true);
-    } else if (allowedOrigins.includes(origin) || origin.startsWith('http://10.') || origin.startsWith('http://192.168.')) {
-      callback(null, true);
-    } else {
-      console.warn(`🚫 CORS blocked origin: "${origin}"`);
-      callback(new Error('Not allowed by CORS'));
+      return callback(null, true);
     }
+
+    if (allowedOrigins.includes(origin) || localOriginRegex.test(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error(`Not allowed by CORS: ${origin}`));
   },
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true, // Support Authorization headers for JWT
 }));
@@ -75,7 +70,6 @@ app.use('/api/users', userRoutes);
 app.use('/api/classes', authenticateToken, classRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/admin/content', contentRoutes);
-app.use('/api/public', publicRoutes);
 
 // Global error handler
 app.use((err, req, res, next) => {

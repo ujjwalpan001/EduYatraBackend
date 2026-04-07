@@ -52,7 +52,7 @@ router.get('/question-banks', authenticateToken, async (req, res) => {
         { visibility: { $in: ['public'] } },
       ],
     })
-      .select('_id name visibility created_by')
+      .select('_id name course_code visibility created_by')
       .populate('created_by', 'fullName');
 
     // Shape response: include creator name for public/shared banks from others
@@ -62,6 +62,7 @@ router.get('/question-banks', authenticateToken, async (req, res) => {
       return {
         _id: bank._id,
         name: bank.name,
+        course_code: bank.course_code || 'N/A',
         visibility: bank.visibility,
         createdByName: isOwner ? null : (bank.created_by?.fullName || null),
       };

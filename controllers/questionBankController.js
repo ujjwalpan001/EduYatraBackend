@@ -31,10 +31,18 @@ export const getAllQuestionBanks = async (req, res) => {
     const enrichedData = await Promise.all(
       questionBanks.map(async (bank) => {
         const questions = await Question.find({ question_bank_id: bank._id });
-        const totalDifficulty = questions.reduce(
-          (sum, q) => sum + (q.difficulty_rating || 1),
-          0
-        );
+        const toDifficultyScore = (question) => {
+          if (typeof question.difficulty_rating === 'number' && question.difficulty_rating > 0) {
+            return question.difficulty_rating;
+          }
+
+          const level = String(question.level || '').toLowerCase();
+          if (level === 'hard') return 3;
+          if (level === 'medium') return 2;
+          return 1;
+        };
+
+        const totalDifficulty = questions.reduce((sum, q) => sum + toDifficultyScore(q), 0);
         const avgDifficulty = questions.length > 0 ? totalDifficulty / questions.length : 1;
         const difficultyLabel =
           avgDifficulty >= 3 ? "Hard" : avgDifficulty >= 2 ? "Medium" : "Easy";

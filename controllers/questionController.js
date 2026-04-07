@@ -144,7 +144,16 @@ export const createQuestion = async (req, res) => {
 
 export const getQuestionBanks = async (req, res) => {
   try {
-    const questionBanks = await QuestionBank.find({ deleted_at: null }).select('name');
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+
+    const questionBanks = await QuestionBank.find({
+      deleted_at: null,
+      created_by: userId,
+    }).select('name');
+
     res.status(200).json({ success: true, questionBanks });
   } catch (err) {
     console.error("❌ Error fetching question banks:", err);
@@ -154,7 +163,24 @@ export const getQuestionBanks = async (req, res) => {
 
 export const getCourses = async (req, res) => {
   try {
-    const courses = await Course.find({ deleted_at: null }).select('course_code name');
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+
+    // Return only course codes used by this teacher's own questions.
+    const userCourseIds = await Question.distinct('course_id', {
+      deleted_at: null,
+      created_by: userId,
+    });
+
+    const courses = await Course.find({
+      _id: { $in: userCourseIds },
+      deleted_at: null,
+    })
+      .select('course_code name')
+      .sort({ course_code: 1 });
+
     res.status(200).json({ success: true, courses });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Error fetching courses' });

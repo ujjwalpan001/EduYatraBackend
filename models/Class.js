@@ -23,9 +23,9 @@ const classSchema = new mongoose.Schema({
     required: true,
   },
   course_id: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Course',
+    type: String,
     required: true,
+    maxlength: 255,
   },
   max_students: {
     type: Number,
@@ -64,4 +64,8 @@ classSchema.pre('save', function (next) {
   next();
 });
 
-export default mongoose.models.Class || mongoose.model('Class', classSchema);
+if (mongoose.models.Class) {
+  delete mongoose.models.Class;
+}
+
+export default mongoose.model('Class', classSchema);
