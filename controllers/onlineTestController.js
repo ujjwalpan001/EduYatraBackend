@@ -344,16 +344,29 @@ export const getAssignedExams = async (req, res) => {
       console.log(`   [${index + 1}] Exam ID: ${qs.exam_id}, is_completed: ${qs.is_completed}`);
     });
 
-    const completedExamIds = new Set(
-      questionSets
-        .filter(qs => qs.is_completed)
-        .map(qs => qs.exam_id.toString())
-    );
+    const examStatusMap = new Map();
+    questionSets.forEach((qs) => {
+      const examKey = qs.exam_id.toString();
+      const current = examStatusMap.get(examKey) || { hasCompleted: false, hasIncomplete: false };
+      if (qs.is_completed) {
+        current.hasCompleted = true;
+      } else {
+        current.hasIncomplete = true;
+      }
+      examStatusMap.set(examKey, current);
+    });
 
-    console.log(`   📊 Completed exam IDs: ${Array.from(completedExamIds).join(', ') || 'None'}`);
+    const completedExamIds = Array.from(examStatusMap.entries())
+      .filter(([, status]) => status.hasCompleted)
+      .map(([examId]) => examId);
+    console.log(`   📊 Completed exam IDs: ${completedExamIds.join(', ') || 'None'}`);
 
-    // Filter out completed exams - only show ongoing ones
-    const ongoingExams = exams.filter(exam => !completedExamIds.has(exam._id.toString()));
+    // Show exams that have at least one active (incomplete) set for this student.
+    // This enables teacher-triggered retests even when a completed attempt exists.
+    const ongoingExams = exams.filter((exam) => {
+      const status = examStatusMap.get(exam._id.toString());
+      return status?.hasIncomplete === true;
+    });
 
     const formattedExams = ongoingExams.map(exam => {
       const now = new Date();
@@ -780,16 +793,18 @@ export const getExamQuestions = async (req, res) => {
       
       let questionSet = await QuestionSet.findOne({
         exam_id: id,
-        student_email: user.email  // Primary lookup by email
-      });
+        student_email: user.email,  // Primary lookup by email
+        is_completed: false
+      }).sort({ created_at: -1 });
 
       // Fallback: try by student_id if email lookup failed
       if (!questionSet && user.id) {
         console.log(`   ℹ️ Email lookup failed, trying by student_id...`);
         questionSet = await QuestionSet.findOne({
           exam_id: id,
-          student_id: user.id
-        });
+          student_id: user.id,
+          is_completed: false
+        }).sort({ created_at: -1 });
       }
 
       if (!questionSet) {
@@ -1053,14 +1068,16 @@ export const submitTest = async (req, res) => {
     // Find the student's question set
     let questionSet = await QuestionSet.findOne({
       exam_id: examId,
-      student_email: user.email
-    });
+      student_email: user.email,
+      is_completed: false
+    }).sort({ created_at: -1 });
 
     if (!questionSet && user.id) {
       questionSet = await QuestionSet.findOne({
         exam_id: examId,
-        student_id: user.id
-      });
+        student_id: user.id,
+        is_completed: false
+      }).sort({ created_at: -1 });
     }
 
     if (!questionSet) {
@@ -2037,7 +2054,7 @@ export const getStudentDetailedAnalysis = async (req, res) => {
       : 0;
 
     // Recent test results
-    const recentTests = submissions.slice(0, 10).map(sub => ({
+    const recentTestsBase = submissions.slice(0, 10).map(sub => ({
       submission_id: sub._id,
       exam_id: sub.exam_id?._id,
       exam_name: sub.exam_id?.title || sub.exam_id?.exam_name || 'Untitled Exam',
@@ -2049,6 +2066,32 @@ export const getStudentDetailedAnalysis = async (req, res) => {
       submitted_at: sub.submitted_at,
       correct_answers: sub.correct_answers
     }));
+
+    const recentExamIds = recentTestsBase
+      .map(test => test.exam_id)
+      .filter(Boolean);
+
+    const pendingRetests = await QuestionSet.find({
+      exam_id: { $in: recentExamIds },
+      student_email: student.email,
+      is_completed: false
+    }).select('exam_id set_number').lean();
+
+    const pendingRetestByExam = new Map(
+      pendingRetests.map(set => [set.exam_id.toString(), set.set_number])
+    );
+
+    const recentTests = recentTestsBase.map((test) => {
+      const pendingSetNumber = test.exam_id
+        ? pendingRetestByExam.get(test.exam_id.toString())
+        : undefined;
+
+      return {
+        ...test,
+        retest_enabled: typeof pendingSetNumber === 'number',
+        retest_set_number: pendingSetNumber || null
+      };
+    });
 
     // Subject-wise performance
     const subjectMap = new Map();
@@ -2477,5 +2520,150 @@ export const getQuestionsByIds = async (req, res) => {
   } catch (error) {
     console.error('❌ Error fetching questions by IDs:', error);
     res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// Toggle retest for a specific student and exam (teacher/admin)
+export const toggleStudentRetest = async (req, res) => {
+  try {
+    const { user } = req;
+    if (!user || !['teacher', 'admin'].includes(user.role)) {
+      return res.status(403).json({ success: false, error: 'Unauthorized: Only teachers/admins can toggle retest' });
+    }
+
+    const { examId, studentId, enable } = req.body;
+    if (!mongoose.Types.ObjectId.isValid(examId) || !mongoose.Types.ObjectId.isValid(studentId)) {
+      return res.status(400).json({ success: false, error: 'Invalid examId or studentId' });
+    }
+
+    const exam = await Exam.findById(examId).lean();
+    if (!exam || exam.deleted_at) {
+      return res.status(404).json({ success: false, error: 'Exam not found' });
+    }
+
+    if (user.role === 'teacher' && exam.teacher_id.toString() !== user.id.toString()) {
+      return res.status(403).json({ success: false, error: 'Unauthorized: You do not own this exam' });
+    }
+
+    const student = await User.findById(studentId).select('_id email').lean();
+    if (!student) {
+      return res.status(404).json({ success: false, error: 'Student not found' });
+    }
+
+    // Ensure the student actually has an attempt for this exam before allowing retest.
+    const latestSubmission = await TestSubmission.findOne({
+      exam_id: examId,
+      student_id: studentId
+    }).sort({ submitted_at: -1 }).lean();
+
+    if (!latestSubmission) {
+      return res.status(400).json({ success: false, error: 'Retest can only be enabled after at least one submitted attempt' });
+    }
+
+    const existingPendingSets = await QuestionSet.find({
+      exam_id: examId,
+      student_email: student.email,
+      is_completed: false
+    }).select('_id').lean();
+
+    if (!enable) {
+      if (existingPendingSets.length > 0) {
+        const pendingIds = existingPendingSets.map(s => s._id);
+        await QuestionSetQuestion.deleteMany({ questionset_id: { $in: pendingIds } });
+        await QuestionSet.deleteMany({ _id: { $in: pendingIds } });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Retest disabled for student',
+        retest_enabled: false
+      });
+    }
+
+    if (existingPendingSets.length > 0) {
+      return res.status(200).json({
+        success: true,
+        message: 'Retest already enabled for this student',
+        retest_enabled: true
+      });
+    }
+
+    // Determine the previously attempted set number.
+    let lastSetNumber = null;
+    if (latestSubmission.question_set_id) {
+      const lastSet = await QuestionSet.findById(latestSubmission.question_set_id).select('set_number').lean();
+      lastSetNumber = lastSet?.set_number || null;
+    }
+
+    const configuredSetCount = Math.max(1, Number(exam.number_of_sets) || 1);
+    const allSetNumbers = Array.from({ length: configuredSetCount }, (_, idx) => idx + 1);
+
+    let nextSetNumber;
+    if (configuredSetCount === 1) {
+      // Single-set exam: allow reattempt using the same set.
+      nextSetNumber = 1;
+    } else {
+      const candidateSetNumbers = lastSetNumber
+        ? allSetNumbers.filter(num => num !== lastSetNumber)
+        : allSetNumbers;
+
+      if (candidateSetNumbers.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'No available set for retest assignment'
+        });
+      }
+
+      nextSetNumber = candidateSetNumbers[Math.floor(Math.random() * candidateSetNumbers.length)];
+    }
+
+    // Use any existing question set of the chosen set number as the source template.
+    const sourceSet = await QuestionSet.findOne({
+      exam_id: examId,
+      set_number: nextSetNumber
+    }).select('_id').lean();
+
+    if (!sourceSet) {
+      return res.status(500).json({ success: false, error: 'Could not find source set for retest assignment' });
+    }
+
+    const sourceQuestions = await QuestionSetQuestion.find({ questionset_id: sourceSet._id })
+      .sort({ question_order: 1 })
+      .select('question_id question_order')
+      .lean();
+
+    if (!sourceQuestions.length) {
+      return res.status(500).json({ success: false, error: 'Source question set has no questions' });
+    }
+
+    const uniqueLink = `${examId}-set-${nextSetNumber}-${Date.now()}-${crypto.randomBytes(8).toString('hex')}`;
+    const newQuestionSet = await QuestionSet.create({
+      exam_id: examId,
+      set_number: nextSetNumber,
+      student_id: student._id,
+      student_email: student.email,
+      link: uniqueLink,
+      is_completed: false,
+      created_at: new Date()
+    });
+
+    const newSetQuestions = sourceQuestions.map((item) => ({
+      questionset_id: newQuestionSet._id,
+      question_id: item.question_id,
+      question_order: item.question_order,
+      created_at: new Date()
+    }));
+
+    await QuestionSetQuestion.insertMany(newSetQuestions);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Retest enabled successfully',
+      retest_enabled: true,
+      set_number: nextSetNumber
+    });
+  } catch (error) {
+    console.error('❌ Error toggling student retest:', error);
+    return res.status(500).json({ success: false, error: error.message });
   }
 };

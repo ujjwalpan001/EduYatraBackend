@@ -19,6 +19,7 @@ import {
   getExamParticipants,
   getAllStudentsForAnalysis,
   getStudentDetailedAnalysis,
+  toggleStudentRetest,
   getTestMonitoringData,
   pauseStudentTest,
   endTest,
@@ -82,6 +83,7 @@ router.get('/student-performance', authenticateToken, getStudentPerformance); //
 router.get('/exam-analysis', authenticateToken, getExamAnalysis); // Teacher exam analysis
 router.get('/students-analysis', authenticateToken, getAllStudentsForAnalysis); // Get all students for analysis
 router.get('/student-analysis/:studentId', authenticateToken, getStudentDetailedAnalysis); // Get detailed student analysis
+router.post('/student-analysis/toggle-retest', authenticateToken, toggleStudentRetest); // Toggle retest for a student/exam
 router.get('/:examId/participants', authenticateToken, getExamParticipants); // Get participants for specific exam
 
 router.get('/groups', authenticateToken, async (req, res) => {
