@@ -32,11 +32,18 @@ connectDB();
 // CORS configuration
 const allowedOrigins = [
   'https://www.deskoros.tech',
+  'https://deskoros.tech',
   'http://localhost:3000',
   'http://localhost:8080',
   'https://eduyatra.vercel.app',
   'https://edu-yatra.vercel.app',
   // Add any specific local or dev origins here as needed.
+];
+
+const trustedHostnames = [
+  'deskoros.tech',
+  'eduyatra.vercel.app',
+  'edu-yatra.vercel.app',
 ];
 
 const isLocalOrigin = (origin) => {
@@ -54,6 +61,12 @@ const isAllowedOrigin = (origin) => {
 
   try {
     const { hostname } = new URL(origin);
+
+    // Allow trusted hostnames and their subdomains.
+    if (trustedHostnames.some((host) => hostname === host || hostname.endsWith(`.${host}`))) {
+      return true;
+    }
+
     // Allow Vercel preview and production domains.
     if (hostname.endsWith('.vercel.app')) {
       return true;
