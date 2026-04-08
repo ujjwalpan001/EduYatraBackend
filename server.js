@@ -34,23 +34,46 @@ const allowedOrigins = [
   'https://www.deskoros.tech',
   'http://localhost:3000',
   'http://localhost:8080',
+  'https://eduyatra.vercel.app',
   'https://edu-yatra.vercel.app',
+  // Add any specific local or dev origins here as needed.
 ];
 
-const localOriginRegex = /^https?:\/\/(localhost|127\.0\.0\.1|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})(:\d+)?$/;
+const isLocalOrigin = (origin) => {
+  return /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]|10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)(:\d+)?$/.test(origin);
+};
+
+const isAllowedOrigin = (origin) => {
+  if (!origin) {
+    return true;
+  }
+
+  if (allowedOrigins.includes(origin) || isLocalOrigin(origin)) {
+    return true;
+  }
+
+  try {
+    const { hostname } = new URL(origin);
+    // Allow Vercel preview and production domains.
+    if (hostname.endsWith('.vercel.app')) {
+      return true;
+    }
+  } catch {
+    return false;
+  }
+
+  return false;
+};
 
 app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (like mobile apps or Postman)
-    if (!origin) {
-      return callback(null, true);
+    if (isAllowedOrigin(origin)) {
+      callback(null, true);
+    } else {
+      console.warn('Blocked by CORS:', origin);
+      callback(new Error('Not allowed by CORS'));
     }
-
-    if (allowedOrigins.includes(origin) || localOriginRegex.test(origin)) {
-      return callback(null, true);
-    }
-
-    return callback(new Error(`Not allowed by CORS: ${origin}`));
   },
   methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
