@@ -78,7 +78,7 @@ const isAllowedOrigin = (origin) => {
   return false;
 };
 
-app.use(cors({
+const corsOptions = {
   origin: (origin, callback) => {
     // Allow requests with no origin (like mobile apps or Postman)
     if (isAllowedOrigin(origin)) {
@@ -88,13 +88,16 @@ app.use(cors({
       callback(new Error('Not allowed by CORS'));
     }
   },
-  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true, // Support Authorization headers for JWT
-}));
+};
 
-// Enable preflight for all routes
-// app.options('*', cors());
+app.use(cors(corsOptions));
+
+// Enable preflight for all routes using the same corsOptions (critical for production)
+// Express 5 requires named wildcards - use '/{*path}' instead of '*'
+app.options('/{*path}', cors(corsOptions));
 
 // Middlewares
 app.use(express.json());
@@ -105,8 +108,9 @@ app.use('/api/exams', authenticateToken, onlineTestRoutes);
 app.use('/api/question-banks', authenticateToken, questionBankRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/classes', authenticateToken, classRoutes);
+// NOTE: /api/content must be mounted BEFORE /api/admin to avoid path shadowing
+app.use('/api/content', contentRoutes);
 app.use('/api/admin', adminRoutes);
-app.use('/api/admin/content', contentRoutes);
 app.use('/api/public', publicRoutes);
 
 // Global error handler
